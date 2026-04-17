@@ -4,7 +4,7 @@ from google.oauth2.service_account import Credentials
 import urllib.parse
 
 # Page Setup - This makes it look like a real website
-st.set_page_config(page_title="Simply Roarke Sourcing", layout="wide")
+st.set_page_config(page_title="Design Sourcing Pro", layout="wide")
 st.title("🌟 Designer's Sourcing Dashboard")
 
 # Secure connection to your Google Sheet
