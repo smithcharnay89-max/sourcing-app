@@ -4,7 +4,7 @@ from google.oauth2.service_account import Credentials
 import urllib.parse
 
 # 1. Page Config
-st.set_page_config(page_title="Sourcing Pro", layout="wide")
+st.set_page_config(page_title="Design Source Pro", layout="wide")
 
 # 2. Database Connection
 scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
@@ -52,15 +52,15 @@ if query:
                     note = item.get('Contact / Specialty', 'Vetted Supplier')
                     st.info(f"**Note:** {note}")
                     
-                    # Draft Email Button
+                    # Draft Email Button (Generic Professional Signature)
                     if "@" in str(note):
                         email = str(note).split('/')[-1].strip()
                         subject = urllib.parse.quote(f"Product Inquiry: {query}")
-                        body = urllib.parse.quote(f"Hi {supplier} team,\n\nI hope you are well. I am inquiring about {query} options.\n\nKind regards,")
+                        body = urllib.parse.quote(f"Hi {supplier} team,\n\nI hope you are well. I am inquiring about {query} options for a project.\n\nPlease let me know your current lead times and availability.\n\nKind regards,\n[Your Name]")
                         mail_link = f"mailto:{email}?subject={subject}&body={body}"
                         st.link_button(f"📧 Draft Email to {supplier}", mail_link)
     else:
         st.warning("No matches found. Try a broader keyword.")
 
 st.markdown("---")
-st.caption("Wholistic Sourcing Tool • Simply Roarke")
+st.caption("Professional Sourcing Tool • Design Source Pro")
