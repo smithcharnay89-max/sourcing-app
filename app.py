@@ -19,21 +19,42 @@ sheet = client.open_by_key(SHEET_ID).sheet1
 data = sheet.get_all_records()
 
 st.title("🏛️ Design Source Pro")
-st.caption("Professional Sourcing & Logistics Assistant")
 
-# 4. Search Bar
-query = st.text_input("What are you sourcing today?", placeholder="e.g. Leather, Tiles, Crema...")
+# 4. Sidebar with WhatsApp Toggle
+with st.sidebar:
+    st.header("Communication Filters")
+    only_whatsapp = st.toggle("Show only WhatsApp-ready suppliers")
+    st.divider()
+    st.caption("Tip: Add phone numbers to your Google Sheet to see more buttons.")
 
-if query:
-    terms = query.lower().split()
-    results = [r for r in data if any(t in str(r).lower() for t in terms)]
+# 5. Search & Filter Logic
+query = st.text_input("Search Suppliers", placeholder="e.g. Leather, Tiles, Crema...")
+
+# Helper to find phone numbers
+def find_phone(text):
+    match = re.search(r'(\+27|0)\d{9}', str(text).replace(" ", ""))
+    if match:
+        num = match.group()
+        return num.replace("0", "27", 1) if num.startswith("0") else num
+    return None
+
+if query or only_whatsapp:
+    results = data
+    
+    # If search is typed
+    if query:
+        terms = query.lower().split()
+        results = [r for r in results if any(t in str(r).lower() for t in terms)]
+    
+    # If WhatsApp toggle is ON
+    if only_whatsapp:
+        results = [r for r in results if find_phone(r.get('Contact / Specialty', ''))]
 
     if results:
         st.success(f"Found {len(results)} Suppliers")
         for item in results:
             with st.container(border=True):
                 col1, col2 = st.columns([1, 1])
-                
                 supplier = str(item.get('Supplier Name', 'Unknown'))
                 location = str(item.get('Location', 'South Africa'))
                 note = str(item.get('Contact / Specialty', ''))
@@ -46,29 +67,18 @@ if query:
                 
                 with col2:
                     lt = item.get('Lead Time') or item.get('Lead Times') or "Inquire"
-                    st.markdown(f"### ⏳ Lead Time: {lt}")
+                    st.markdown(f"### ⏳ {lt}")
                     st.info(f"**Note:** {note}")
                     
-                    # COMMUNICATION BUTTONS
-                    btn_col1, btn_col2 = st.columns(2)
-                    
-                    with btn_col1:
-                        # EMAIL LOGIC
+                    b_col1, b_col2 = st.columns(2)
+                    with b_col1:
                         if "@" in note:
                             email = note.split('/')[-1].strip() if '/' in note else note
-                            subject = urllib.parse.quote(f"Inquiry: {query}")
-                            body = urllib.parse.quote(f"Hi {supplier} team,\n\nI am inquiring about {query}.\n\nKind regards,\n[Your Name]")
-                            st.link_button("📧 Email", f"mailto:{email}?subject={subject}&body={body}", use_container_width=True)
-
-                    with btn_col2:
-                        # WHATSAPP LOGIC - Extracts numbers from the note
-                        phone_match = re.search(r'(\+27|0)\d{9}', note.replace(" ", ""))
-                        if phone_match:
-                            phone = phone_match.group().replace("0", "27", 1) if phone_match.group().startswith("0") else phone_match.group()
-                            wa_msg = urllib.parse.quote(f"Hi {supplier}, I'm inquiring about {query} options via Design Source Pro.")
-                            st.link_button("💬 WhatsApp", f"https://wa.me/{phone}?text={wa_msg}", use_container_width=True)
-    else:
-        st.warning("No matches found.")
-
-st.markdown("---")
-st.caption("Internal Use Only • Design Source Pro")
+                            mail_link = f"mailto:{email}?subject=Inquiry&body=Hi {supplier}..."
+                            st.link_button("📧 Email", mail_link, use_container_width=True)
+                    
+                    with b_col2:
+                        phone = find_phone(note)
+                        if phone:
+                            wa_url = f"https://wa.me/{phone}?text=Hi {supplier}, I'm inquiring via Design Source Pro."
+                            st.link_button("💬 WhatsApp", wa_url, use_container_width=True)
