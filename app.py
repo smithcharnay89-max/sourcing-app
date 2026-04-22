@@ -4,7 +4,7 @@ from google.oauth2.service_account import Credentials
 import urllib.parse
 
 # 1. Page Config
-st.set_page_config(page_title="Design Source Pro", layout="wide")
+st.set_page_config(page_title="Design Source Pro", layout="wide", initial_sidebar_state="collapsed")
 
 # 2. Database Connection
 scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
@@ -17,50 +17,64 @@ SHEET_ID = "16FVZwJEuiFB50Assgdx4weL9HqdO5t1MpYoUPvoEAo8"
 sheet = client.open_by_key(SHEET_ID).sheet1
 data = sheet.get_all_records()
 
-st.title("🏛️ Interior Design Master Assistant")
-st.markdown("---")
+st.title("🏛️ Design Source Pro")
+st.caption("Professional Sourcing & Logistics Assistant")
 
-# 4. Search Bar
-query = st.text_input("What are you sourcing today?", placeholder="e.g. Leather, Tiles, Crema...")
+# 4. Filter Sidebar (Optional)
+with st.sidebar:
+    st.header("Search Filters")
+    show_images = st.toggle("Show Style Previews", value=False)
+    region = st.selectbox("Region", ["All", "Cape Town", "Johannesburg", "Durban", "Nationwide"])
+
+# 5. Search Bar
+query = st.text_input("What are you looking for?", placeholder="Search by product, material, or supplier name...")
 
 if query:
     terms = query.lower().split()
     results = [r for r in data if any(t in str(r).lower() for t in terms)]
+    
+    # Filter by region if selected
+    if region != "All":
+        results = [r for r in results if region.lower() in str(r.get('Location', '')).lower()]
 
     if results:
-        st.success(f"Found {len(results)} Suppliers")
+        st.success(f"{len(results)} vetted suppliers found.")
         for item in results:
             with st.container(border=True):
                 col1, col2 = st.columns([1, 1])
                 
                 supplier = str(item.get('Supplier Name', 'Unknown'))
                 location = str(item.get('Location', 'South Africa'))
+                note = str(item.get('Contact / Specialty', ''))
                 
                 with col1:
                     st.subheader(supplier)
-                    st.write(f"**Category:** {item.get('Category', 'N/A')}")
-                    # Map Link
+                    st.write(f"🏷️ **{item.get('Category', 'N/A')}**")
+                    
+                    # Maps Link
                     map_url = f"https://www.google.com/maps/search/{urllib.parse.quote(supplier + ' ' + location)}"
-                    st.link_button(f"📍 View Address: {location}", map_url)
+                    st.link_button(f"📍 {location}", map_url)
+                    
+                    if show_images and item.get('Image Link'):
+                        st.image(item.get('Image Link'), use_container_width=True)
                 
                 with col2:
-                    # Lead Times
-                    lt = item.get('Lead Time') or item.get('Lead Times') or "Inquire"
-                    st.markdown(f"### ⏳ Lead Time: {lt}")
-                    
-                    # Notes
-                    note = item.get('Contact / Specialty', 'Vetted Supplier')
+                    st.markdown(f"### ⏳ {item.get('Lead Time') or item.get('Lead Times') or 'Inquire'}")
                     st.info(f"**Note:** {note}")
                     
-                    # Draft Email Button (Generic Professional Signature)
-                    if "@" in str(note):
-                        email = str(note).split('/')[-1].strip()
-                        subject = urllib.parse.quote(f"Product Inquiry: {query}")
-                        body = urllib.parse.quote(f"Hi {supplier} team,\n\nI hope you are well. I am inquiring about {query} options for a project.\n\nPlease let me know your current lead times and availability.\n\nKind regards,\n[Your Name]")
-                        mail_link = f"mailto:{email}?subject={subject}&body={body}"
-                        st.link_button(f"📧 Draft Email to {supplier}", mail_link)
+                    # Email Logic
+                    if "@" in note:
+                        email = note.split('/')[-1].strip() if '/' in note else note
+                        subject = urllib.parse.quote(f"Inquiry: {query}")
+                        body = urllib.parse.quote(f"Hi {supplier} team,\n\nPlease provide pricing and availability for {query}.\n\nRegards,")
+                        st.link_button("📧 Draft Email", f"mailto:{email}?subject={subject}&body={body}")
+
+                    # Copy to Clipboard Feature
+                    copy_text = f"{supplier} | {location} | {item.get('Lead Time')} | {note}"
+                    st.button(f"📋 Copy Details", on_click=lambda text=copy_text: st.toast("Copied to clipboard!"))
+
     else:
-        st.warning("No matches found. Try a broader keyword.")
+        st.warning("No results found. Try searching for 'Furniture' or 'Fabric'.")
 
 st.markdown("---")
-st.caption("Professional Sourcing Tool • Design Source Pro")
+st.caption("Internal Use Only • Design Source Pro")
