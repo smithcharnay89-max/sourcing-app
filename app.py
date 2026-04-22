@@ -39,31 +39,28 @@ if query:
                 with col1:
                     st.subheader(supplier)
                     st.write(f"**Category:** {item.get('Category', 'N/A')}")
-                    
-                    # GOOGLE MAPS LINK: Clickable Address
+                    # Map Link
                     map_url = f"https://www.google.com/maps/search/{urllib.parse.quote(supplier + ' ' + location)}"
                     st.link_button(f"📍 View Address: {location}", map_url)
                 
                 with col2:
-                    # LEAD TIMES
+                    # Lead Times - checks plural and singular
                     lt = item.get('Lead Time') or item.get('Lead Times') or "Inquire"
                     st.markdown(f"### ⏳ Lead Time: {lt}")
                     
-                    # NOTES
+                    # Notes
                     note = item.get('Contact / Specialty', 'Vetted Supplier')
                     st.info(f"**Note:** {note}")
                     
-                    # DRAFT EMAIL BUTTON
+                    # Draft Email Button
                     if "@" in str(note):
                         email = str(note).split('/')[-1].strip()
-                        # This creates a professional subject line automatically
-                        subject = urllib.parse.quote(f"Product Inquiry: {query} (via Simply Roarke)")
-                        body = urllib.parse.quote(f"Hi {supplier} team,\n\nI hope you are well. I am inquiring about {query} options. Please let me know current availability.\n\nKind regards,")
-                        
+                        subject = urllib.parse.quote(f"Product Inquiry: {query}")
+                        body = urllib.parse.quote(f"Hi {supplier} team,\n\nI hope you are well. I am inquiring about {query} options.\n\nKind regards,")
                         mail_link = f"mailto:{email}?subject={subject}&body={body}"
                         st.link_button(f"📧 Draft Email to {supplier}", mail_link)
     else:
-        st.warning("No matches found. Try a different keyword.")
+        st.warning("No matches found. Try a broader keyword.")
 
 st.markdown("---")
-st.caption("Custom Assistant for Professional Sourcing")
+st.caption("Wholistic Sourcing Tool • Powered by Simply Roarke")
