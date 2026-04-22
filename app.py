@@ -33,8 +33,8 @@ if query:
             with st.container(border=True):
                 col1, col2 = st.columns([1, 1])
                 
-                supplier = item.get('Supplier Name', 'Unknown')
-                location = item.get('Location', 'South Africa')
+                supplier = str(item.get('Supplier Name', 'Unknown'))
+                location = str(item.get('Location', 'South Africa'))
                 
                 with col1:
                     st.subheader(supplier)
@@ -44,7 +44,7 @@ if query:
                     st.link_button(f"📍 View Address: {location}", map_url)
                 
                 with col2:
-                    # Lead Times - checks plural and singular
+                    # Lead Times
                     lt = item.get('Lead Time') or item.get('Lead Times') or "Inquire"
                     st.markdown(f"### ⏳ Lead Time: {lt}")
                     
@@ -63,4 +63,4 @@ if query:
         st.warning("No matches found. Try a broader keyword.")
 
 st.markdown("---")
-st.caption("Wholistic Sourcing Tool • Powered by Simply Roarke")
+st.caption("Wholistic Sourcing Tool • Simply Roarke")
