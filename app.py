@@ -2,6 +2,7 @@ import streamlit as st
 import gspread
 from google.oauth2.service_account import Credentials
 import urllib.parse
+import re
 
 # 1. Page Config
 st.set_page_config(page_title="Design Source Pro", layout="wide", initial_sidebar_state="collapsed")
@@ -20,25 +21,15 @@ data = sheet.get_all_records()
 st.title("🏛️ Design Source Pro")
 st.caption("Professional Sourcing & Logistics Assistant")
 
-# 4. Filter Sidebar (Optional)
-with st.sidebar:
-    st.header("Search Filters")
-    show_images = st.toggle("Show Style Previews", value=False)
-    region = st.selectbox("Region", ["All", "Cape Town", "Johannesburg", "Durban", "Nationwide"])
-
-# 5. Search Bar
-query = st.text_input("What are you looking for?", placeholder="Search by product, material, or supplier name...")
+# 4. Search Bar
+query = st.text_input("What are you sourcing today?", placeholder="e.g. Leather, Tiles, Crema...")
 
 if query:
     terms = query.lower().split()
     results = [r for r in data if any(t in str(r).lower() for t in terms)]
-    
-    # Filter by region if selected
-    if region != "All":
-        results = [r for r in results if region.lower() in str(r.get('Location', '')).lower()]
 
     if results:
-        st.success(f"{len(results)} vetted suppliers found.")
+        st.success(f"Found {len(results)} Suppliers")
         for item in results:
             with st.container(border=True):
                 col1, col2 = st.columns([1, 1])
@@ -50,31 +41,34 @@ if query:
                 with col1:
                     st.subheader(supplier)
                     st.write(f"🏷️ **{item.get('Category', 'N/A')}**")
-                    
-                    # Maps Link
                     map_url = f"https://www.google.com/maps/search/{urllib.parse.quote(supplier + ' ' + location)}"
                     st.link_button(f"📍 {location}", map_url)
-                    
-                    if show_images and item.get('Image Link'):
-                        st.image(item.get('Image Link'), use_container_width=True)
                 
                 with col2:
-                    st.markdown(f"### ⏳ {item.get('Lead Time') or item.get('Lead Times') or 'Inquire'}")
+                    lt = item.get('Lead Time') or item.get('Lead Times') or "Inquire"
+                    st.markdown(f"### ⏳ Lead Time: {lt}")
                     st.info(f"**Note:** {note}")
                     
-                    # Email Logic
-                    if "@" in note:
-                        email = note.split('/')[-1].strip() if '/' in note else note
-                        subject = urllib.parse.quote(f"Inquiry: {query}")
-                        body = urllib.parse.quote(f"Hi {supplier} team,\n\nPlease provide pricing and availability for {query}.\n\nRegards,")
-                        st.link_button("📧 Draft Email", f"mailto:{email}?subject={subject}&body={body}")
+                    # COMMUNICATION BUTTONS
+                    btn_col1, btn_col2 = st.columns(2)
+                    
+                    with btn_col1:
+                        # EMAIL LOGIC
+                        if "@" in note:
+                            email = note.split('/')[-1].strip() if '/' in note else note
+                            subject = urllib.parse.quote(f"Inquiry: {query}")
+                            body = urllib.parse.quote(f"Hi {supplier} team,\n\nI am inquiring about {query}.\n\nKind regards,\n[Your Name]")
+                            st.link_button("📧 Email", f"mailto:{email}?subject={subject}&body={body}", use_container_width=True)
 
-                    # Copy to Clipboard Feature
-                    copy_text = f"{supplier} | {location} | {item.get('Lead Time')} | {note}"
-                    st.button(f"📋 Copy Details", on_click=lambda text=copy_text: st.toast("Copied to clipboard!"))
-
+                    with btn_col2:
+                        # WHATSAPP LOGIC - Extracts numbers from the note
+                        phone_match = re.search(r'(\+27|0)\d{9}', note.replace(" ", ""))
+                        if phone_match:
+                            phone = phone_match.group().replace("0", "27", 1) if phone_match.group().startswith("0") else phone_match.group()
+                            wa_msg = urllib.parse.quote(f"Hi {supplier}, I'm inquiring about {query} options via Design Source Pro.")
+                            st.link_button("💬 WhatsApp", f"https://wa.me/{phone}?text={wa_msg}", use_container_width=True)
     else:
-        st.warning("No results found. Try searching for 'Furniture' or 'Fabric'.")
+        st.warning("No matches found.")
 
 st.markdown("---")
 st.caption("Internal Use Only • Design Source Pro")
