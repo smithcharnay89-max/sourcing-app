@@ -1,37 +1,52 @@
-if query:
-    search_terms = query.lower().split()
-    results = []
+import streamlit as st
+import gspread
+from google.oauth2.service_account import Credentials
 
-    for row in data:
-        # We combine the Name, Category, and Description to search everything at once
-        full_text = f"{row.get('Supplier Name', '')} {row.get('Category', '')} {row.get('Contact / Specialty', '')}".lower()
-        
-        # This makes the search "Fuzzy" - if any of your words match any part of the row
-        if any(term in full_text for term in search_terms):
-            results.append(row)
+# Minimalist Layout
+st.set_page_config(page_title="Sourcing Pro", layout="wide")
+
+# Database Connection
+scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+creds_dict = st.secrets["gcp_service_account"]
+creds = Credentials.from_service_account_info(creds_dict, scopes=scope)
+client = gspread.authorize(creds)
+
+SHEET_ID = "16FVZwJEuiFB50Assgdx4weL9HqdO5t1MpYoUPvoEAo8" 
+sheet = client.open_by_key(SHEET_ID).sheet1
+data = sheet.get_all_records()
+
+st.title("🔎 Sourcing Assistant")
+st.info("Searching your Master Supplier List...")
+
+query = st.text_input("What do you need?", placeholder="e.g. Fabric, Marble, Crema...")
+
+if query:
+    terms = query.lower().split()
+    results = [r for r in data if any(t in str(r).lower() for t in terms)]
 
     if results:
-        st.success(f"I found {len(results)} potential matches for you.")
         for item in results:
             with st.container(border=True):
-                c1, c2 = st.columns([1, 2])
-                with c1:
+                # We put the most important info in columns so it's easy to read
+                col1, col2 = st.columns([1, 1])
+                
+                with col1:
                     st.subheader(item.get('Supplier Name', 'N/A'))
+                    st.write(f"**Category:** {item.get('Category', 'N/A')}")
                     st.caption(f"📍 {item.get('Location', 'N/A')}")
-                with c2:
-                    # Explicitly pull Lead Times and Stock
-                    # Make sure these column names match your Google Sheet exactly!
-                    lead = item.get('Lead Times', 'Contact for details')
-                    stock = item.get('Stock Levels', 'Check availability')
+                
+                with col2:
+                    # HIGHLIGHTING LEAD TIMES FOR EFFICIENCY
+                    lead_time = item.get('Lead Time', 'Inquire')
+                    st.markdown(f"### ⏳ {lead_time}")
                     
-                    st.markdown(f"⏳ **Lead Time:** {lead}")
-                    st.markdown(f"📦 **Stock Status:** {stock}")
+                    # Specialty/Contact Info
+                    specialty = item.get('Contact / Specialty', '')
+                    st.write(f"**Note:** {specialty}")
                     
-                    # Specialty text
-                    specialty = item.get('Contact / Specialty', 'High-end sourcing')
-                    st.write(f"📝 {specialty}")
-                    
-                    # Email Logic
-                    email = str(specialty).split('/')[-1].strip() if '/' in str(specialty) else ""
-                    if "@" in email:
-                        st.link_button(f"📧 Message {item.get('Supplier Name')}", f"mailto:{email}")
+                    # Quick Email Button
+                    if "@" in str(specialty):
+                        email = str(specialty).split('/')[-1].strip()
+                        st.link_button("📧 Quick Email", f"mailto:{email}")
+    else:
+        st.warning("No matches found in your list.")
