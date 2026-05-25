@@ -69,6 +69,7 @@ def clean_conversational_query(user_query):
         query_lower = re.sub(phrase, "", query_lower)
     return [t.strip() for t in query_lower.split() if t.strip() not in ['a', 'an', 'the', 'with', 'in', 'for']]
 
+# Cleaned contact parser to prevent messy link formatting
 def extract_clean_email(item_dict):
     for val in item_dict.values():
         val_str = str(val).strip()
@@ -86,7 +87,7 @@ def add_to_moodboard(item, project):
     else:
         st.toast("ℹ️ Already on your Moodboard")
 
-# SAFE PARSING ENGINE: Won't crash if the library isn't fully built on Streamlit yet
+# PARSING ENGINE
 def parse_quote_pdf(file_upload):
     try:
         import pypdf
@@ -116,17 +117,17 @@ def parse_quote_pdf(file_upload):
                 
         detected_total = max(clean_amounts) if clean_amounts else 0.0
         lines = [l.strip() for l in full_text.split('\n') if l.strip()]
-        detected_title = lines[0][:40] if lines else "Scanned Document Selection"
+        detected_title = lines[0][:30] if lines else "Scanned Document"
         
         return {
             "name": f"📄 PDF: {detected_title}",
-            "supplier": "Scanned Document",
+            "supplier": "Imported Quote",
             "cost": detected_total,
             "qty": 1,
             "status": "Quoted"
         }
     except ImportError:
-        st.error("The scanning extension is still setting up on the server. Please try again in a few minutes or use manual entry.")
+        st.error("The scanning backend extension is still compiling on the server. Give it a minute or log manually.")
         return None
     except Exception as e:
         return None
@@ -247,17 +248,23 @@ with tab3:
 
         st.write("---")
         
+        # FIXED ACTION: Option C layout button visibility threshold adjusted
         st.markdown("**Option C: ⚡ Scan Quote/Invoice PDF**")
         uploaded_quote = st.file_uploader("Upload Supplier PDF Document", type=["pdf"], key="invoice_scanner_upload")
         
-        if uploaded_quote is not None:
-            if st.button("🔍 Run Document Scan"):
-                with st.spinner("Extracting parameters and running OCR analysis..."):
+        # Button is permanently anchored in place now
+        if st.button("🔍 Run Document Scan"):
+            if uploaded_quote is not None:
+                with st.spinner("Analyzing text layout matrix..."):
                     parsed_result = parse_quote_pdf(uploaded_quote)
                     if parsed_result:
                         st.session_state.projects[active_project]["financial_ledger"].append(parsed_result)
-                        st.success("Successfully processed quote metrics!")
+                        st.toast("Processed quote parameters successfully!")
                         st.rerun()
+                    else:
+                        st.error("Could not pull structured textual details from this document structure.")
+            else:
+                st.warning("Please drag and drop a PDF document into the container zone before running scan operations.")
 
     with col_right:
         st.subheader("📋 Budget Calculator")
