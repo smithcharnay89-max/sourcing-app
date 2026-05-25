@@ -49,6 +49,7 @@ with st.sidebar:
     )
     
     st.write("---")
+    # Clean float value step normalization to clear commas from interface
     current_budget = st.number_input(
         "Set Client Total Budget (R)", 
         min_value=0.0, 
@@ -69,7 +70,6 @@ def clean_conversational_query(user_query):
         query_lower = re.sub(phrase, "", query_lower)
     return [t.strip() for t in query_lower.split() if t.strip() not in ['a', 'an', 'the', 'with', 'in', 'for']]
 
-# Cleaned contact parser to prevent messy link formatting
 def extract_clean_email(item_dict):
     for val in item_dict.values():
         val_str = str(val).strip()
@@ -87,47 +87,59 @@ def add_to_moodboard(item, project):
     else:
         st.toast("ℹ️ Already on your Moodboard")
 
-# PARSING ENGINE
+# ADVANCED EXTRACTION ENGINE USING PDFPLUMBER
 def parse_quote_pdf(file_upload):
     try:
-        import pypdf
-        reader = pypdf.PdfReader(file_upload)
+        import pdfplumber
         full_text = ""
-        for page in reader.pages:
-            text = page.extract_text()
-            if text:
-                full_text += text + "\n"
         
+        # pdfplumber systematically walks through structural tables and columns
+        with pdfplumber.open(file_upload) as pdf:
+            for page in pdf.pages:
+                text = page.extract_text(layout=True) # Retains tabular structural proximity
+                if text:
+                    full_text += text + "\n"
+                    
         if not full_text.strip():
             return None
+            
+        # Expanded Regex pattern matching variants common in SA invoicing (e.g., R 15 000.00, R15,400.99, 1200.00)
+        amounts = re.findall(r'(?:R?\s?\d{1,3}(?:[.,\s]\d{3})*(?:[.,]\d{2}))', full_text)
         
-        amounts = re.findall(r'(?:R?\s?\(?\d{1,3}(?:[.,\s]\d{3})*(?:[.,]\d{2})\)?)', full_text)
         clean_amounts = []
         for amt in amounts:
-            c_amt = amt.replace('R', '').replace('(', '').replace(')', '').replace(' ', '').replace(',', '')
+            # Clean symbols out to isolate raw float allocations safely
+            c_amt = amt.replace('R', '').replace(' ', '').replace(',', '')
             try:
-                if '.' in c_amt:
-                    parts = c_amt.split('.')
-                    val = float(parts[0]) + float(f"0.{parts[1]}")
-                else:
-                    val = float(c_amt)
-                clean_amounts.append(val)
+                val = float(c_amt)
+                # Filter out obvious micro line item details or quantities (under R100)
+                if val >= 100.0:
+                    clean_amounts.append(val)
             except ValueError:
                 continue
                 
+        # Target the maximum numeric parameter as the primary grand total summary
         detected_total = max(clean_amounts) if clean_amounts else 0.0
+        
+        # Establish a description name string from document parameters
         lines = [l.strip() for l in full_text.split('\n') if l.strip()]
-        detected_title = lines[0][:30] if lines else "Scanned Document"
+        detected_title = "Scanned Document"
+        if lines:
+            # Try to grab the first text element line that isn't purely numbers
+            for line in lines[:3]:
+                if len(line) > 4 and not line.replace('.','').replace(',','').isdigit():
+                    detected_title = line[:30]
+                    break
         
         return {
-            "name": f"📄 PDF: {detected_title}",
-            "supplier": "Imported Quote",
+            "name": f"📄 {detected_title}",
+            "supplier": "Imported Supplier Quote",
             "cost": detected_total,
             "qty": 1,
             "status": "Quoted"
         }
     except ImportError:
-        st.error("The scanning backend extension is still compiling on the server. Give it a minute or log manually.")
+        st.error("The upgraded scanning extension is compiling on the server platform. Give it a brief moment.")
         return None
     except Exception as e:
         return None
@@ -248,21 +260,19 @@ with tab3:
 
         st.write("---")
         
-        # FIXED ACTION: Option C layout button visibility threshold adjusted
         st.markdown("**Option C: ⚡ Scan Quote/Invoice PDF**")
         uploaded_quote = st.file_uploader("Upload Supplier PDF Document", type=["pdf"], key="invoice_scanner_upload")
         
-        # Button is permanently anchored in place now
         if st.button("🔍 Run Document Scan"):
             if uploaded_quote is not None:
-                with st.spinner("Analyzing text layout matrix..."):
+                with st.spinner("Extracting parameters and running deep structural scan..."):
                     parsed_result = parse_quote_pdf(uploaded_quote)
                     if parsed_result:
                         st.session_state.projects[active_project]["financial_ledger"].append(parsed_result)
                         st.toast("Processed quote parameters successfully!")
                         st.rerun()
                     else:
-                        st.error("Could not pull structured textual details from this document structure.")
+                        st.error("Could not pull structured text lines. The document format might be unreadable or unencrypted.")
             else:
                 st.warning("Please drag and drop a PDF document into the container zone before running scan operations.")
 
