@@ -40,51 +40,50 @@ with st.sidebar:
         options=list(st.session_state.projects.keys())
     )
 
-# Helper function to smart-extract values from rows
-def extract_details(item_dict):
+# Advanced logic to surgically extract emails and phone numbers from anywhere in the row
+def extract_clean_details(item_dict):
     stock = 'N/A'
     email = 'N/A'
     phone = 'N/A'
     
-    # 1. Smart Scan for Stock
+    # 1. Extract Stock Level
     stock_keys = ['stock', 'stock level', 'qty', 'quantity', 'availability', 'in stock', 'status']
     for k, v in item_dict.items():
         if str(k).lower().strip() in stock_keys and v:
             stock = str(v)
             break
 
-    # 2. Smart Scan for explicit Email/Phone columns
-    email_keys = ['email', 'email address', 'contact email', 'supplier email', 'mail']
-    phone_keys = ['phone', 'phone number', 'telephone', 'contact number', 'tel', 'mobile']
-    
-    for k, v in item_dict.items():
-        k_clean = str(k).lower().strip()
-        if k_clean in email_keys and v:
-            email = str(v)
-        if k_clean in phone_keys and v:
-            phone = str(v)
+    # Loop through all values in the row to find hidden contact details
+    for val in item_dict.values():
+        val_str = str(val).strip()
+        if not val_str:
+            continue
             
-    # 3. Deep Fallback Scan (If columns are named weirdly, find pattern in any cell)
-    if email == 'N/A' or phone == 'N/A':
-        for val in item_dict.values():
-            val_str = str(val).strip()
-            # Look for an email pattern
-            if email == 'N/A' and '@' in val_str and '.' in val_str:
-                email = val_str
-            # Look for a telephone pattern (more than 5 digits, numbers/spaces/dashes/+ only)
-            if phone == 'N/A' and re.match(r'^\+?[0-9\s\-]{6,15}$', val_str):
-                phone = val_str
+        # 2. Surgical Email Extraction (Finds "info@domain.co.za" even inside "[Text / info@...]")
+        if email == 'N/A':
+            email_match = re.search(r'[\w\.-]+@[\w\.-]+\.\w+', val_str)
+            if email_match:
+                email = email_match.group(0)
+
+        # 3. Surgical Phone Extraction (Finds typical SA/international phone patterns within text strings)
+        if phone == 'N/A':
+            # Looks for numbers with 7 to 15 digits that might include spaces, dashes, or leading plus signs
+            phone_match = re.search(r'(\+?\(?\d{1,4}\)?[\s.-]?\d{3,4}[\s.-]?\d{3,4})', val_str)
+            if phone_match:
+                cleaned_phone = phone_match.group(0).strip()
+                # Ensure it's a real phone number, not a short code or year
+                if len([c for c in cleaned_phone if c.isdigit()]) >= 7:
+                    phone = cleaned_phone
                 
     return stock, email, phone
 
 def add_to_board(item, project):
-    if item.get('Supplier Name') or item.get('Brand'):
-        name_key = item.get('Supplier Name') or item.get('Brand')
-        if name_key not in [x.get('Supplier Name') or x.get('Brand') for x in st.session_state.projects[project]]:
-            st.session_state.projects[project].append(item)
-            st.toast(f"Added to {project}!")
-        else:
-            st.toast("ℹ️ Already in project")
+    title = item.get('Supplier Name') or item.get('Brand') or item.get('Product Name') or "Unknown Item"
+    if title not in [x.get('Supplier Name') or x.get('Brand') or x.get('Product Name') for x in st.session_state.projects[project]]:
+        st.session_state.projects[project].append(item)
+        st.toast(f"Added to {project}!")
+    else:
+        st.toast("ℹ️ Already in project")
 
 st.title("🏛️ Design Source Pro")
 st.caption(f"📍 Currently editing: **{active_project}**")
@@ -101,7 +100,6 @@ with tab1:
             with st.container(border=True):
                 c1, c2 = st.columns([3, 1])
                 with c1:
-                    # Dynamically determine title if 'Supplier Name' isn't the exact header
                     title = item.get('Supplier Name') or item.get('Brand') or item.get('Product Name') or "Unknown Item"
                     st.subheader(title)
                     
@@ -109,8 +107,8 @@ with tab1:
                     lead_time = item.get('Lead Time') or item.get('Leadtime') or 'N/A'
                     st.write(f"**Category:** {category} | ⏳ **Lead Time:** {lead_time}")
                     
-                    # Run the deep extractor
-                    stock_val, email_val, phone_val = extract_details(item)
+                    # Run the dynamic detail parser
+                    stock_val, email_val, phone_val = extract_clean_details(item)
                     
                     st.write(f"📦 **Stock Level:** {stock_val}")
                     
@@ -152,7 +150,7 @@ with tab2:
                     b_title = board_item.get('Supplier Name') or board_item.get('Brand') or board_item.get('Product Name') or "Item"
                     st.write(f"**{b_title}**")
                     
-                    b_stock, b_email, b_phone = extract_details(board_item)
+                    b_stock, b_email, b_phone = extract_clean_details(board_item)
                     
                     st.caption(f"📦 Stock: {b_stock}")
                     st.caption(f"✉️ {b_email}")
