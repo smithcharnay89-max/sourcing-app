@@ -49,7 +49,6 @@ with st.sidebar:
     )
     
     st.write("---")
-    # Clean float value step normalization to clear commas from interface
     current_budget = st.number_input(
         "Set Client Total Budget (R)", 
         min_value=0.0, 
@@ -87,45 +86,39 @@ def add_to_moodboard(item, project):
     else:
         st.toast("ℹ️ Already on your Moodboard")
 
-# ADVANCED EXTRACTION ENGINE USING PDFPLUMBER
+# FINALISED INVOICE PARSING ENGINE
 def parse_quote_pdf(file_upload):
     try:
         import pdfplumber
         full_text = ""
         
-        # pdfplumber systematically walks through structural tables and columns
         with pdfplumber.open(file_upload) as pdf:
             for page in pdf.pages:
-                text = page.extract_text(layout=True) # Retains tabular structural proximity
+                text = page.extract_text(layout=True)
                 if text:
                     full_text += text + "\n"
                     
         if not full_text.strip():
             return None
             
-        # Expanded Regex pattern matching variants common in SA invoicing (e.g., R 15 000.00, R15,400.99, 1200.00)
+        # Refined regex pattern to match both standard currency strings and raw decimal totals
         amounts = re.findall(r'(?:R?\s?\d{1,3}(?:[.,\s]\d{3})*(?:[.,]\d{2}))', full_text)
         
         clean_amounts = []
         for amt in amounts:
-            # Clean symbols out to isolate raw float allocations safely
             c_amt = amt.replace('R', '').replace(' ', '').replace(',', '')
             try:
                 val = float(c_amt)
-                # Filter out obvious micro line item details or quantities (under R100)
-                if val >= 100.0:
+                if val >= 100.0: # Excludes layout page counts or item quantities
                     clean_amounts.append(val)
             except ValueError:
                 continue
                 
-        # Target the maximum numeric parameter as the primary grand total summary
         detected_total = max(clean_amounts) if clean_amounts else 0.0
         
-        # Establish a description name string from document parameters
         lines = [l.strip() for l in full_text.split('\n') if l.strip()]
-        detected_title = "Scanned Document"
+        detected_title = "Imported Supplier Quote"
         if lines:
-            # Try to grab the first text element line that isn't purely numbers
             for line in lines[:3]:
                 if len(line) > 4 and not line.replace('.','').replace(',','').isdigit():
                     detected_title = line[:30]
@@ -133,13 +126,13 @@ def parse_quote_pdf(file_upload):
         
         return {
             "name": f"📄 {detected_title}",
-            "supplier": "Imported Supplier Quote",
+            "supplier": "PDF Upload Scan",
             "cost": detected_total,
             "qty": 1,
             "status": "Quoted"
         }
     except ImportError:
-        st.error("The upgraded scanning extension is compiling on the server platform. Give it a brief moment.")
+        st.error("The upgraded scanning extension is still building on the server platform. Give it a moment to complete.")
         return None
     except Exception as e:
         return None
@@ -272,7 +265,7 @@ with tab3:
                         st.toast("Processed quote parameters successfully!")
                         st.rerun()
                     else:
-                        st.error("Could not pull structured text lines. The document format might be unreadable or unencrypted.")
+                        st.error("Could not pull structured text lines. The document format might be unreadable or empty.")
             else:
                 st.warning("Please drag and drop a PDF document into the container zone before running scan operations.")
 
