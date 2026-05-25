@@ -13,12 +13,21 @@ creds = Credentials.from_service_account_info(creds_dict, scopes=scope)
 client = gspread.authorize(creds)
 SHEET_ID = "16FVZwJEuiFB50Assgdx4weL9HqdO5t1MpYoUPvoEAo8" 
 sheet = client.open_by_key(SHEET_ID).sheet1
+
+# Fetch data
 data = sheet.get_all_records()
+
+# --- DIAGNOSTIC: GET ACTUAL SHEET HEADERS ---
+# This grabs the very first row of your sheet so we can see the exact column names.
+try:
+    sheet_headers = sheet.row_values(1)
+except Exception:
+    sheet_headers = list(data[0].keys()) if data else []
 
 # Multi-Project Session State
 if 'projects' not in st.session_state:
     st.session_state.projects = {
-        "Main Board": []  # Default project
+        "Main Board": []
     }
 
 # 3. Sidebar for Project Management
@@ -39,6 +48,12 @@ with st.sidebar:
         "Current Active Project", 
         options=list(st.session_state.projects.keys())
     )
+    
+    # --- VISUAL INSPECTOR (Look here on your app screen!) ---
+    st.write("---")
+    with st.expander("🔍 Inspect Sheet Columns"):
+        st.caption("These are your exact column names from Google Sheets:")
+        st.write(sheet_headers)
 
 def add_to_board(item, project):
     if item['Supplier Name'] not in [x['Supplier Name'] for x in st.session_state.projects[project]]:
@@ -64,19 +79,32 @@ with tab1:
                 with c1:
                     st.subheader(item.get('Supplier Name'))
                     st.write(f"**Category:** {item.get('Category')} | ⏳ **Lead Time:** {item.get('Lead Time')}")
-                    st.write(f"📦 **Stock Level:** {item.get('Stock Level', 'N/A')}")
                     
-                    # --- DYNAMIC CONTACT COLS (Looks for Email and Phone columns) ---
-                    email = item.get('Email') or item.get('Email Address') or 'N/A'
-                    phone = item.get('Phone') or item.get('Phone Number') or 'N/A'
+                    # Safe extraction helper that ignores case and spaces
+                    def get_field(item_dict, keys_to_try):
+                        for k in keys_to_try:
+                            # Try exact match
+                            if k in item_dict and item_dict[k]:
+                                return item_dict[k]
+                            # Try lowercase/stripped matching fallback
+                            for actual_key in item_dict.keys():
+                                if actual_key.lower().strip() == k.lower().strip() and item_dict[actual_key]:
+                                    return item_dict[actual_key]
+                        return 'N/A'
+
+                    # Extract values using common naming variations
+                    stock_val = get_field(item, ['Stock Level', 'Stock', 'In Stock', 'Qty'])
+                    email_val = get_field(item, ['Email', 'Email Address', 'Contact Email', 'Supplier Email'])
+                    phone_val = get_field(item, ['Phone', 'Phone Number', 'Telephone', 'Contact Number'])
                     
-                    # Display them cleanly. If email exists, make it a clickable mailto: link
-                    if email != 'N/A':
-                        st.write(f"✉️ **Email:** [{email}](mailto:{email})")
+                    st.write(f"📦 **Stock Level:** {stock_val}")
+                    
+                    if email_val != 'N/A':
+                        st.write(f"✉️ **Email:** [{email_val}](mailto:{email_val})")
                     else:
                         st.write(f"✉️ **Email:** N/A")
                         
-                    st.write(f"📞 **Phone:** {phone}")
+                    st.write(f"📞 **Phone:** {phone_val}")
                     
                     if item.get('Website'):
                         st.markdown(f"🔗 [Visit Website]({item.get('Website')})")
@@ -106,11 +134,12 @@ with tab2:
                     
                     st.write(f"**{board_item.get('Supplier Name')}**")
                     
-                    # --- ADDED CONTACT DETAILS TO MOODBOARD CARDS ---
-                    b_email = board_item.get('Email') or board_item.get('Email Address') or 'N/A'
-                    b_phone = board_item.get('Phone') or board_item.get('Phone Number') or 'N/A'
+                    # Carry over the helper values for the moodboard layout
+                    b_stock = get_field(board_item, ['Stock Level', 'Stock', 'In Stock', 'Qty'])
+                    b_email = get_field(board_item, ['Email', 'Email Address', 'Contact Email', 'Supplier Email'])
+                    b_phone = get_field(board_item, ['Phone', 'Phone Number', 'Telephone', 'Contact Number'])
                     
-                    st.caption(f"📦 Stock: {board_item.get('Stock Level', 'N/A')}")
+                    st.caption(f"📦 Stock: {b_stock}")
                     st.caption(f"✉️ {b_email}")
                     st.caption(f"📞 {b_phone}")
         
