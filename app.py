@@ -2,6 +2,8 @@ import streamlit as st
 import gspread
 from google.oauth2.service_account import Credentials
 import re
+# NEW: Import for reading PDF text data
+import pypdf
 
 # 1. Setup
 st.set_page_config(page_title="Design Source Pro", layout="wide")
@@ -19,9 +21,9 @@ data = sheet.get_all_records()
 if 'projects' not in st.session_state:
     st.session_state.projects = {
         "Main Board": {
-            "moodboard_items": [],  # Items pinned from the spreadsheet
-            "financial_ledger": [], # Items explicitly imported or manually added to expenses
-            "budget": 250000.0      # Project budget limit
+            "moodboard_items": [],  
+            "financial_ledger": [], 
+            "budget": 250000.0      
         }
     }
 
@@ -29,7 +31,7 @@ if 'projects' not in st.session_state:
 with st.sidebar:
     st.header("📂 Project Operations")
     
-    new_project_name = st.text_input("Create New Project", placeholder="e.g. Smith Residence")
+    new_project_name = st.text_input("Create New Project", placeholder="e.g. Project Llandudno")
     if st.button("➕ Create Project") and new_project_name.strip():
         proj_title = new_project_name.strip()
         if proj_title not in st.session_state.projects:
@@ -57,7 +59,7 @@ with st.sidebar:
     )
     st.session_state.projects[active_project]["budget"] = current_budget
 
-# Helpers
+# Conversational helper queries
 def clean_conversational_query(user_query):
     query_lower = user_query.lower().strip()
     filler_phrases = [
@@ -85,6 +87,57 @@ def add_to_moodboard(item, project):
         st.toast(f"Saved {title} to Moodboard!")
     else:
         st.toast("ℹ️ Already on your Moodboard")
+
+# --- SMART PDF SCANNING ENGINE ---
+def parse_quote_pdf(file_upload):
+    try:
+        reader = pypdf.PdfReader(file_upload)
+        full_text = ""
+        for page in reader.pages:
+            text = page.extract_text()
+            if text:
+                full_text += text + "\n"
+        
+        if not full_text.strip():
+            return None
+        
+        # Look for the absolute biggest financial currency value as a projected Total Cost
+        # Handles formats like R15,400.00 or 15400.00
+        amounts = re.findall(r'(?:R?\s?\(?\d{1,3}(?:[.,\s]\d{3})*(?:[.,]\d{2})\)?)', full_text)
+        
+        clean_amounts = []
+        for amt in amounts:
+            # Clean symbols out to isolate numeric value safely
+            c_amt = amt.replace('R', '').replace('(', '').replace(')', '').replace(' ', '').replace(',', '')
+            try:
+                # Handle possible trailing decimals correctly
+                if '.' in c_amt:
+                    parts = c_amt.split('.')
+                    # Reconstruct if commas were stripped aggressively
+                    val = float(parts[0]) + float(f"0.{parts[1]}")
+                else:
+                    val = float(c_amt)
+                clean_amounts.append(val)
+            except ValueError:
+                continue
+                
+        detected_total = max(clean_amounts) if clean_amounts else 0.0
+        
+        # Pull a clean fallback headline snippet from the first text block to name the item
+        lines = [l.strip() for l in full_text.split('\n') if l.strip()]
+        detected_title = lines[0][:40] if lines else "Scanned Document Selection"
+        
+        return {
+            "name": f"📄 PDF: {detected_title}",
+            "supplier": "Scanned Document",
+            "cost": detected_total,
+            "qty": 1,
+            "status": "Quoted"
+        }
+    except Exception as e:
+        st.error(f"Error compiling document parser parameters: {e}")
+        return None
+
 
 st.title("🏛️ Design Source Pro")
 st.caption(f"📍 Managing: **{active_project}**")
@@ -151,25 +204,21 @@ with tab2:
     else:
         st.info("Your moodboard is currently empty. Use the Smart Assistant tab to find and add items.")
 
-# --- TAB 3: INDEPENDENT FINANCES ---
+# --- TAB 3: INDEPENDENT FINANCES & PDF SCANNING ---
 with tab3:
     st.header(f"📊 Project Procurement Ledger: {active_project}")
     
-    # Setup independent columns for layout
     col_left, col_right = st.columns([1, 2])
     
     with col_left:
         st.subheader("➕ Add Expenses")
         
-        # INTERACTION 1: Import directly from your moodboard
+        # OPTION A: Import from saved items
         st.markdown("**Option A: Import From Moodboard**")
         mb_options = [item.get('Supplier Name') or item.get('Brand') or item.get('Product Name') for item in board_items]
-        
         selected_mb_item = st.selectbox("Select saved item to pull into finances", options=["-- Select Item --"] + mb_options)
         if st.button("📥 Import Item to Ledger") and selected_mb_item != "-- Select Item --":
-            # Find the actual item data dictionary from moodboard lists
             target_item = next(item for item in board_items if (item.get('Supplier Name') or item.get('Brand') or item.get('Product Name')) == selected_mb_item)
-            
             new_expense = {
                 "name": selected_mb_item,
                 "supplier": target_item.get('Category') or "Catalog Item",
@@ -183,14 +232,13 @@ with tab3:
             
         st.write("---")
         
-        # INTERACTION 2: Log a completely random out-of-pocket or custom expense
+        # OPTION B: Manual Entry
         st.markdown("**Option B: Log Custom/Ad-Hoc Purchase**")
         c_name = st.text_input("Expense Description", placeholder="e.g. Custom Black Leather Chair")
         c_supplier = st.text_input("Supplier/Store", placeholder="e.g. Weylandts")
         c_cost = st.number_input("Unit Cost (R)", min_value=0.0, step=100.0)
         c_qty = st.number_input("Quantity", min_value=1, step=1, value=1)
         c_status = st.selectbox("Status", ["Pending", "Quoted", "Paid"])
-        
         if st.button("💾 Log Custom Expense"):
             if c_name.strip():
                 new_custom = {
@@ -206,17 +254,32 @@ with tab3:
             else:
                 st.error("Please enter a description.")
 
+        st.write("---")
+        
+        # NEW: OPTION C: Digital PDF Quote/Invoice Parsing Engine
+        st.markdown("**Option C: ⚡ Scan Quote/Invoice PDF**")
+        uploaded_quote = st.file_uploader("Upload Supplier PDF Document", type=["pdf"], key="invoice_scanner_upload")
+        
+        if uploaded_quote is not None:
+            if st.button("🔍 Run Document Scan"):
+                with st.spinner("Extracting parameters and running OCR analysis..."):
+                    parsed_result = parse_quote_pdf(uploaded_quote)
+                    if parsed_result:
+                        st.session_state.projects[active_project]["financial_ledger"].append(parsed_result)
+                        st.success("Successfully processed quote metrics!")
+                        st.rerun()
+                    else:
+                        st.error("Could not pull clean structural text lines from this specific file version. Try manual entry.")
+
     with col_right:
         st.subheader("📋 Budget Calculator")
         
         ledger = st.session_state.projects[active_project]["financial_ledger"]
         budget_limit = st.session_state.projects[active_project]["budget"]
         
-        # Calculate totals dynamically
         total_spent = sum(line['cost'] * line['qty'] for line in ledger)
         remaining_budget = budget_limit - total_spent
         
-        # Financial Widgets
         m1, m2 = st.columns(2)
         m1.metric("Total Cost Allocation", f"R{total_spent:,.2f}")
         if remaining_budget >= 0:
@@ -227,7 +290,6 @@ with tab3:
             
         st.write("---")
         
-        # Loop over ledger items dynamically with completely unique dynamic key labels to avoid duplicate widget errors
         if ledger:
             for idx, line in enumerate(ledger):
                 with st.container(border=True):
@@ -236,7 +298,6 @@ with tab3:
                         st.write(f"**{line['name']}**")
                         st.caption(f"Supplier: {line['supplier']} | Total: R{line['cost']*line['qty']:,.2f}")
                     with grid2:
-                        # Unique structural key tags explicitly using line index integers
                         new_cost = st.number_input(f"Cost (R)##val_{idx}", min_value=0.0, value=line['cost'], step=100.0, key=f"cost_input_{idx}")
                         new_qty = st.number_input(f"Qty##val_{idx}", min_value=1, value=line['qty'], step=1, key=f"qty_input_{idx}")
                     with grid3:
@@ -245,7 +306,6 @@ with tab3:
                             st.session_state.projects[active_project]["financial_ledger"].pop(idx)
                             st.rerun()
                             
-                    # Track alterations live inside state vectors safely
                     if new_cost != line['cost'] or new_qty != line['qty'] or new_stat != line['status']:
                         st.session_state.projects[active_project]["financial_ledger"][idx]['cost'] = new_cost
                         st.session_state.projects[active_project]["financial_ledger"][idx]['qty'] = new_qty
