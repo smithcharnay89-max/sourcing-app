@@ -2,8 +2,6 @@ import streamlit as st
 import gspread
 from google.oauth2.service_account import Credentials
 import re
-# NEW: Import for reading PDF text data
-import pypdf
 
 # 1. Setup
 st.set_page_config(page_title="Design Source Pro", layout="wide")
@@ -59,7 +57,7 @@ with st.sidebar:
     )
     st.session_state.projects[active_project]["budget"] = current_budget
 
-# Conversational helper queries
+# Helpers
 def clean_conversational_query(user_query):
     query_lower = user_query.lower().strip()
     filler_phrases = [
@@ -88,9 +86,10 @@ def add_to_moodboard(item, project):
     else:
         st.toast("ℹ️ Already on your Moodboard")
 
-# --- SMART PDF SCANNING ENGINE ---
+# SAFE PARSING ENGINE: Won't crash if the library isn't fully built on Streamlit yet
 def parse_quote_pdf(file_upload):
     try:
+        import pypdf
         reader = pypdf.PdfReader(file_upload)
         full_text = ""
         for page in reader.pages:
@@ -101,19 +100,13 @@ def parse_quote_pdf(file_upload):
         if not full_text.strip():
             return None
         
-        # Look for the absolute biggest financial currency value as a projected Total Cost
-        # Handles formats like R15,400.00 or 15400.00
         amounts = re.findall(r'(?:R?\s?\(?\d{1,3}(?:[.,\s]\d{3})*(?:[.,]\d{2})\)?)', full_text)
-        
         clean_amounts = []
         for amt in amounts:
-            # Clean symbols out to isolate numeric value safely
             c_amt = amt.replace('R', '').replace('(', '').replace(')', '').replace(' ', '').replace(',', '')
             try:
-                # Handle possible trailing decimals correctly
                 if '.' in c_amt:
                     parts = c_amt.split('.')
-                    # Reconstruct if commas were stripped aggressively
                     val = float(parts[0]) + float(f"0.{parts[1]}")
                 else:
                     val = float(c_amt)
@@ -122,8 +115,6 @@ def parse_quote_pdf(file_upload):
                 continue
                 
         detected_total = max(clean_amounts) if clean_amounts else 0.0
-        
-        # Pull a clean fallback headline snippet from the first text block to name the item
         lines = [l.strip() for l in full_text.split('\n') if l.strip()]
         detected_title = lines[0][:40] if lines else "Scanned Document Selection"
         
@@ -134,8 +125,10 @@ def parse_quote_pdf(file_upload):
             "qty": 1,
             "status": "Quoted"
         }
+    except ImportError:
+        st.error("The scanning extension is still setting up on the server. Please try again in a few minutes or use manual entry.")
+        return None
     except Exception as e:
-        st.error(f"Error compiling document parser parameters: {e}")
         return None
 
 
@@ -213,7 +206,6 @@ with tab3:
     with col_left:
         st.subheader("➕ Add Expenses")
         
-        # OPTION A: Import from saved items
         st.markdown("**Option A: Import From Moodboard**")
         mb_options = [item.get('Supplier Name') or item.get('Brand') or item.get('Product Name') for item in board_items]
         selected_mb_item = st.selectbox("Select saved item to pull into finances", options=["-- Select Item --"] + mb_options)
@@ -232,7 +224,6 @@ with tab3:
             
         st.write("---")
         
-        # OPTION B: Manual Entry
         st.markdown("**Option B: Log Custom/Ad-Hoc Purchase**")
         c_name = st.text_input("Expense Description", placeholder="e.g. Custom Black Leather Chair")
         c_supplier = st.text_input("Supplier/Store", placeholder="e.g. Weylandts")
@@ -256,7 +247,6 @@ with tab3:
 
         st.write("---")
         
-        # NEW: OPTION C: Digital PDF Quote/Invoice Parsing Engine
         st.markdown("**Option C: ⚡ Scan Quote/Invoice PDF**")
         uploaded_quote = st.file_uploader("Upload Supplier PDF Document", type=["pdf"], key="invoice_scanner_upload")
         
@@ -268,8 +258,6 @@ with tab3:
                         st.session_state.projects[active_project]["financial_ledger"].append(parsed_result)
                         st.success("Successfully processed quote metrics!")
                         st.rerun()
-                    else:
-                        st.error("Could not pull clean structural text lines from this specific file version. Try manual entry.")
 
     with col_right:
         st.subheader("📋 Budget Calculator")
