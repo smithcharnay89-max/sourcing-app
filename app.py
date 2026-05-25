@@ -92,9 +92,9 @@ with tab1:
                                     return item_dict[actual_key]
                         return 'N/A'
 
-                    # Extract values using common naming variations
                     stock_val = get_field(item, ['Stock Level', 'Stock', 'In Stock', 'Qty'])
-                    email_val = get_field(item, ['Email', 'Email Address', 'Contact Email', 'Supplier Email'])
+email_val = get_field(item, ['Email', 'Email Address', 'Contact Email'])
+phone_val = get_field(item, ['Phone', 'Phone Number', 'Telephone'])
                     phone_val = get_field(item, ['Phone', 'Phone Number', 'Telephone', 'Contact Number'])
                     
                     st.write(f"📦 **Stock Level:** {stock_val}")
