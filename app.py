@@ -15,8 +15,7 @@ SHEET_ID = "16FVZwJEuiFB50Assgdx4weL9HqdO5t1MpYoUPvoEAo8"
 sheet = client.open_by_key(SHEET_ID).sheet1
 data = sheet.get_all_records()
 
-# --- NEW: MULTI-PROJECT SESSION STATE ---
-# We now store items as a dictionary where keys are project names: {"Project A": [items], "Project B": [items]}
+# Multi-Project Session State
 if 'projects' not in st.session_state:
     st.session_state.projects = {
         "Main Board": []  # Default project
@@ -26,8 +25,7 @@ if 'projects' not in st.session_state:
 with st.sidebar:
     st.header("📂 Project Manager")
     
-    # Text input to create a brand new project
-    new_project_name = st.text_input("Create New Project", placeholder="e.g. Smith Residence, Office Fitout")
+    new_project_name = st.text_input("Create New Project", placeholder="e.g. Smith Residence")
     if st.button("➕ Create Project") and new_project_name.strip():
         proj_title = new_project_name.strip()
         if proj_title not in st.session_state.projects:
@@ -37,15 +35,12 @@ with st.sidebar:
             
     st.write("---")
     
-    # Dropdown to select which project you are currently working on
     active_project = st.selectbox(
         "Current Active Project", 
         options=list(st.session_state.projects.keys())
     )
 
-# Callback function to add item to the currently selected project
 def add_to_board(item, project):
-    # Check if the item is already in this specific project to avoid duplicates
     if item['Supplier Name'] not in [x['Supplier Name'] for x in st.session_state.projects[project]]:
         st.session_state.projects[project].append(item)
         st.toast(f"Added to {project}!")
@@ -69,12 +64,24 @@ with tab1:
                 with c1:
                     st.subheader(item.get('Supplier Name'))
                     st.write(f"**Category:** {item.get('Category')} | ⏳ **Lead Time:** {item.get('Lead Time')}")
-                    st.write(f"📦 **Stock Level:** {item.get('Stock Level', 'N/A')} | 📞 **Contact:** {item.get('Contact Details', 'N/A')}")
+                    st.write(f"📦 **Stock Level:** {item.get('Stock Level', 'N/A')}")
+                    
+                    # --- DYNAMIC CONTACT COLS (Looks for Email and Phone columns) ---
+                    email = item.get('Email') or item.get('Email Address') or 'N/A'
+                    phone = item.get('Phone') or item.get('Phone Number') or 'N/A'
+                    
+                    # Display them cleanly. If email exists, make it a clickable mailto: link
+                    if email != 'N/A':
+                        st.write(f"✉️ **Email:** [{email}](mailto:{email})")
+                    else:
+                        st.write(f"✉️ **Email:** N/A")
+                        
+                    st.write(f"📞 **Phone:** {phone}")
+                    
                     if item.get('Website'):
                         st.markdown(f"🔗 [Visit Website]({item.get('Website')})")
                     
                 with c2:
-                    # Pass BOTH the item and the active_project to the function
                     st.button(
                         f"➕ Add to {active_project}", 
                         key=f"a_{item['Supplier Name']}_{active_project}", 
@@ -84,8 +91,6 @@ with tab1:
 
 with tab2:
     st.header(f"🎨 {active_project} Moodboard")
-    
-    # Get the items specifically for the active project
     current_board_items = st.session_state.projects[active_project]
     
     if current_board_items:
@@ -100,12 +105,18 @@ with tab2:
                         st.image(img_url, use_container_width=True)
                     
                     st.write(f"**{board_item.get('Supplier Name')}**")
+                    
+                    # --- ADDED CONTACT DETAILS TO MOODBOARD CARDS ---
+                    b_email = board_item.get('Email') or board_item.get('Email Address') or 'N/A'
+                    b_phone = board_item.get('Phone') or board_item.get('Phone Number') or 'N/A'
+                    
                     st.caption(f"📦 Stock: {board_item.get('Stock Level', 'N/A')}")
-                    st.caption(f"⏳ Lead: {board_item.get('Lead Time', 'N/A')}")
+                    st.caption(f"✉️ {b_email}")
+                    st.caption(f"📞 {b_phone}")
         
         st.write("---")
         if st.button(f"🗑️ Clear {active_project}"):
             st.session_state.projects[active_project] = []
             st.rerun()
     else:
-        st.info(f"Your board for '{active_project}' is empty. Search for items and click 'Add to {active_project}' to populate it.")
+        st.info(f"Your board for '{active_project}' is empty.")
