@@ -1,7 +1,7 @@
 import streamlit as st
 import gspread
 from google.oauth2.service_account import Credentials
-import urllib.parse
+import re
 
 # 1. Setup
 st.set_page_config(page_title="Design Source Pro", layout="wide")
@@ -13,16 +13,7 @@ creds = Credentials.from_service_account_info(creds_dict, scopes=scope)
 client = gspread.authorize(creds)
 SHEET_ID = "16FVZwJEuiFB50Assgdx4weL9HqdO5t1MpYoUPvoEAo8" 
 sheet = client.open_by_key(SHEET_ID).sheet1
-
-# Fetch data
 data = sheet.get_all_records()
-
-# --- DIAGNOSTIC: GET ACTUAL SHEET HEADERS ---
-# This grabs the very first row of your sheet so we can see the exact column names.
-try:
-    sheet_headers = sheet.row_values(1)
-except Exception:
-    sheet_headers = list(data[0].keys()) if data else []
 
 # Multi-Project Session State
 if 'projects' not in st.session_state:
@@ -48,19 +39,52 @@ with st.sidebar:
         "Current Active Project", 
         options=list(st.session_state.projects.keys())
     )
+
+# Helper function to smart-extract values from rows
+def extract_details(item_dict):
+    stock = 'N/A'
+    email = 'N/A'
+    phone = 'N/A'
     
-    # --- VISUAL INSPECTOR (Look here on your app screen!) ---
-    st.write("---")
-    with st.expander("🔍 Inspect Sheet Columns"):
-        st.caption("These are your exact column names from Google Sheets:")
-        st.write(sheet_headers)
+    # 1. Smart Scan for Stock
+    stock_keys = ['stock', 'stock level', 'qty', 'quantity', 'availability', 'in stock', 'status']
+    for k, v in item_dict.items():
+        if str(k).lower().strip() in stock_keys and v:
+            stock = str(v)
+            break
+
+    # 2. Smart Scan for explicit Email/Phone columns
+    email_keys = ['email', 'email address', 'contact email', 'supplier email', 'mail']
+    phone_keys = ['phone', 'phone number', 'telephone', 'contact number', 'tel', 'mobile']
+    
+    for k, v in item_dict.items():
+        k_clean = str(k).lower().strip()
+        if k_clean in email_keys and v:
+            email = str(v)
+        if k_clean in phone_keys and v:
+            phone = str(v)
+            
+    # 3. Deep Fallback Scan (If columns are named weirdly, find pattern in any cell)
+    if email == 'N/A' or phone == 'N/A':
+        for val in item_dict.values():
+            val_str = str(val).strip()
+            # Look for an email pattern
+            if email == 'N/A' and '@' in val_str and '.' in val_str:
+                email = val_str
+            # Look for a telephone pattern (more than 5 digits, numbers/spaces/dashes/+ only)
+            if phone == 'N/A' and re.match(r'^\+?[0-9\s\-]{6,15}$', val_str):
+                phone = val_str
+                
+    return stock, email, phone
 
 def add_to_board(item, project):
-    if item['Supplier Name'] not in [x['Supplier Name'] for x in st.session_state.projects[project]]:
-        st.session_state.projects[project].append(item)
-        st.toast(f"Added to {project}!")
-    else:
-        st.toast(f"ℹ️ Already in {project}")
+    if item.get('Supplier Name') or item.get('Brand'):
+        name_key = item.get('Supplier Name') or item.get('Brand')
+        if name_key not in [x.get('Supplier Name') or x.get('Brand') for x in st.session_state.projects[project]]:
+            st.session_state.projects[project].append(item)
+            st.toast(f"Added to {project}!")
+        else:
+            st.toast("ℹ️ Already in project")
 
 st.title("🏛️ Design Source Pro")
 st.caption(f"📍 Currently editing: **{active_project}**")
@@ -77,25 +101,16 @@ with tab1:
             with st.container(border=True):
                 c1, c2 = st.columns([3, 1])
                 with c1:
-                    st.subheader(item.get('Supplier Name'))
-                    st.write(f"**Category:** {item.get('Category')} | ⏳ **Lead Time:** {item.get('Lead Time')}")
+                    # Dynamically determine title if 'Supplier Name' isn't the exact header
+                    title = item.get('Supplier Name') or item.get('Brand') or item.get('Product Name') or "Unknown Item"
+                    st.subheader(title)
                     
-                    # Safe extraction helper that ignores case and spaces
-                    def get_field(item_dict, keys_to_try):
-                        for k in keys_to_try:
-                            # Try exact match
-                            if k in item_dict and item_dict[k]:
-                                return item_dict[k]
-                            # Try lowercase/stripped matching fallback
-                            for actual_key in item_dict.keys():
-                                if actual_key.lower().strip() == k.lower().strip() and item_dict[actual_key]:
-                                    return item_dict[actual_key]
-                        return 'N/A'
-
-                    stock_val = get_field(item, ['Stock Level', 'Stock', 'In Stock', 'Qty'])
-email_val = get_field(item, ['Email', 'Email Address', 'Contact Email'])
-phone_val = get_field(item, ['Phone', 'Phone Number', 'Telephone'])
-                    phone_val = get_field(item, ['Phone', 'Phone Number', 'Telephone', 'Contact Number'])
+                    category = item.get('Category') or item.get('Type') or 'N/A'
+                    lead_time = item.get('Lead Time') or item.get('Leadtime') or 'N/A'
+                    st.write(f"**Category:** {category} | ⏳ **Lead Time:** {lead_time}")
+                    
+                    # Run the deep extractor
+                    stock_val, email_val, phone_val = extract_details(item)
                     
                     st.write(f"📦 **Stock Level:** {stock_val}")
                     
@@ -106,13 +121,14 @@ phone_val = get_field(item, ['Phone', 'Phone Number', 'Telephone'])
                         
                     st.write(f"📞 **Phone:** {phone_val}")
                     
-                    if item.get('Website'):
-                        st.markdown(f"🔗 [Visit Website]({item.get('Website')})")
+                    website = item.get('Website') or item.get('Link')
+                    if website:
+                        st.markdown(f"🔗 [Visit Website]({website})")
                     
                 with c2:
                     st.button(
                         f"➕ Add to {active_project}", 
-                        key=f"a_{item['Supplier Name']}_{active_project}", 
+                        key=f"a_{title}_{active_project}", 
                         on_click=add_to_board, 
                         args=(item, active_project)
                     )
@@ -126,18 +142,17 @@ with tab2:
         for idx, board_item in enumerate(current_board_items):
             with cols[idx % 3]:
                 with st.container(border=True):
-                    img_url = board_item.get('Image Link')
+                    img_url = board_item.get('Image Link') or board_item.get('Image') or board_item.get('Photo')
+                    category_fallback = board_item.get('Category') or board_item.get('Type') or 'Item'
                     if not img_url:
-                        st.markdown(f"### 🛋️\n**{board_item.get('Category')}**")
+                        st.markdown(f"### 🛋️\n**{category_fallback}**")
                     else:
                         st.image(img_url, use_container_width=True)
                     
-                    st.write(f"**{board_item.get('Supplier Name')}**")
+                    b_title = board_item.get('Supplier Name') or board_item.get('Brand') or board_item.get('Product Name') or "Item"
+                    st.write(f"**{b_title}**")
                     
-                    # Carry over the helper values for the moodboard layout
-                    b_stock = get_field(board_item, ['Stock Level', 'Stock', 'In Stock', 'Qty'])
-                    b_email = get_field(board_item, ['Email', 'Email Address', 'Contact Email', 'Supplier Email'])
-                    b_phone = get_field(board_item, ['Phone', 'Phone Number', 'Telephone', 'Contact Number'])
+                    b_stock, b_email, b_phone = extract_details(board_item)
                     
                     st.caption(f"📦 Stock: {b_stock}")
                     st.caption(f"✉️ {b_email}")
