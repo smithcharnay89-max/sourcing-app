@@ -40,40 +40,51 @@ with st.sidebar:
         options=list(st.session_state.projects.keys())
     )
 
-# Advanced logic to surgically extract emails and phone numbers from anywhere in the row
+# Super-charged dynamic extractor for phone numbers and stock levels
 def extract_clean_details(item_dict):
     stock = 'N/A'
     email = 'N/A'
     phone = 'N/A'
     
-    # 1. Extract Stock Level
-    stock_keys = ['stock', 'stock level', 'qty', 'quantity', 'availability', 'in stock', 'status']
+    # 1. Target explicit column keyword matches first (case-insensitive)
     for k, v in item_dict.items():
-        if str(k).lower().strip() in stock_keys and v:
-            stock = str(v)
-            break
+        k_clean = str(k).lower().strip()
+        v_str = str(v).strip()
+        if not v_str:
+            continue
+            
+        if any(x in k_clean for x in ['stock', 'qty', 'quantity', 'avail']):
+            stock = v_str
+        if any(x in k_clean for x in ['phone', 'tel', 'cell', 'contact', 'number', 'mob']):
+            # Clean up formatting strings if it's mixed with text
+            phone_match = re.search(r'(\+?\(?\d{1,4}\)?[\s.-]?\d{2,4}[\s.-]?\d{3,4}[\s.-]?\d{3,4})', v_str)
+            if phone_match:
+                phone = phone_match.group(0).strip()
+            else:
+                phone = v_str
 
-    # Loop through all values in the row to find hidden contact details
+    # 2. Complete Row Fallback Scan (if columns are named abstractly)
     for val in item_dict.values():
         val_str = str(val).strip()
         if not val_str:
             continue
             
-        # 2. Surgical Email Extraction (Finds "info@domain.co.za" even inside "[Text / info@...]")
+        # Surgical Email Pull
         if email == 'N/A':
             email_match = re.search(r'[\w\.-]+@[\w\.-]+\.\w+', val_str)
             if email_match:
                 email = email_match.group(0)
 
-        # 3. Surgical Phone Extraction (Finds typical SA/international phone patterns within text strings)
+        # Surgical Phone Pull (Looks for sequences of 7-15 digits typical for telephone records)
         if phone == 'N/A':
-            # Looks for numbers with 7 to 15 digits that might include spaces, dashes, or leading plus signs
-            phone_match = re.search(r'(\+?\(?\d{1,4}\)?[\s.-]?\d{3,4}[\s.-]?\d{3,4})', val_str)
+            # This regex captures telephone strings even if they contain dashes or spaces
+            phone_match = re.search(r'(\+?[0-9\s\-]{7,17})', val_str)
             if phone_match:
-                cleaned_phone = phone_match.group(0).strip()
-                # Ensure it's a real phone number, not a short code or year
-                if len([c for c in cleaned_phone if c.isdigit()]) >= 7:
-                    phone = cleaned_phone
+                potential_phone = phone_match.group(0).strip()
+                # Confirm it contains a logical amount of actual numbers (ignores years like 2026)
+                digits_only = [c for c in potential_phone if c.isdigit()]
+                if len(digits_only) >= 9 and len(digits_only) <= 15:
+                    phone = potential_phone
                 
     return stock, email, phone
 
@@ -107,7 +118,7 @@ with tab1:
                     lead_time = item.get('Lead Time') or item.get('Leadtime') or 'N/A'
                     st.write(f"**Category:** {category} | ⏳ **Lead Time:** {lead_time}")
                     
-                    # Run the dynamic detail parser
+                    # Run the advanced parser
                     stock_val, email_val, phone_val = extract_clean_details(item)
                     
                     st.write(f"📦 **Stock Level:** {stock_val}")
