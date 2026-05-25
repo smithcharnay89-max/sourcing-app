@@ -40,53 +40,32 @@ with st.sidebar:
         options=list(st.session_state.projects.keys())
     )
 
-# Super-charged dynamic extractor for phone numbers and stock levels
-def extract_clean_details(item_dict):
-    stock = 'N/A'
-    email = 'N/A'
-    phone = 'N/A'
+# CONVERSATIONAL CLEANER: Strips out conversational filler phrases
+def clean_conversational_query(user_query):
+    query_lower = user_query.lower().strip()
     
-    # 1. Target explicit column keyword matches first (case-insensitive)
-    for k, v in item_dict.items():
-        k_clean = str(k).lower().strip()
-        v_str = str(v).strip()
-        if not v_str:
-            continue
-            
-        if any(x in k_clean for x in ['stock', 'qty', 'quantity', 'avail']):
-            stock = v_str
-        if any(x in k_clean for x in ['phone', 'tel', 'cell', 'contact', 'number', 'mob']):
-            # Clean up formatting strings if it's mixed with text
-            phone_match = re.search(r'(\+?\(?\d{1,4}\)?[\s.-]?\d{2,4}[\s.-]?\d{3,4}[\s.-]?\d{3,4})', v_str)
-            if phone_match:
-                phone = phone_match.group(0).strip()
-            else:
-                phone = v_str
+    # Phrases to remove so the bot can focus on actual design materials/items
+    filler_phrases = [
+        r"where can i find a", r"where can i find", r"do you have any", r"do you have a", 
+        r"looking for a", r"looking for", r"show me", r"i need a", r"i need", 
+        r"can you find", r"please find", r"help me find"
+    ]
+    
+    for phrase in filler_phrases:
+        query_lower = re.sub(phrase, "", query_lower)
+        
+    # Split into clean, individual descriptive terms (e.g., ['black', 'leather', 'couch'])
+    terms = [t.strip() for t in query_lower.split() if t.strip() not in ['a', 'an', 'the', 'with', 'in', 'for']]
+    return terms
 
-    # 2. Complete Row Fallback Scan (if columns are named abstractly)
+# Cleaner helper for emails
+def extract_clean_email(item_dict):
     for val in item_dict.values():
         val_str = str(val).strip()
-        if not val_str:
-            continue
-            
-        # Surgical Email Pull
-        if email == 'N/A':
-            email_match = re.search(r'[\w\.-]+@[\w\.-]+\.\w+', val_str)
-            if email_match:
-                email = email_match.group(0)
-
-        # Surgical Phone Pull (Looks for sequences of 7-15 digits typical for telephone records)
-        if phone == 'N/A':
-            # This regex captures telephone strings even if they contain dashes or spaces
-            phone_match = re.search(r'(\+?[0-9\s\-]{7,17})', val_str)
-            if phone_match:
-                potential_phone = phone_match.group(0).strip()
-                # Confirm it contains a logical amount of actual numbers (ignores years like 2026)
-                digits_only = [c for c in potential_phone if c.isdigit()]
-                if len(digits_only) >= 9 and len(digits_only) <= 15:
-                    phone = potential_phone
-                
-    return stock, email, phone
+        email_match = re.search(r'[\w\.-]+@[\w\.-]+\.\w+', val_str)
+        if email_match:
+            return email_match.group(0)
+    return 'N/A'
 
 def add_to_board(item, project):
     title = item.get('Supplier Name') or item.get('Brand') or item.get('Product Name') or "Unknown Item"
@@ -99,48 +78,66 @@ def add_to_board(item, project):
 st.title("🏛️ Design Source Pro")
 st.caption(f"📍 Currently editing: **{active_project}**")
 
-tab1, tab2 = st.tabs(["🔎 Search & Source", "🎨 Project Boards"])
+tab1, tab2 = st.tabs(["🔎 Smart Assistant", "🎨 Project Boards"])
 
 with tab1:
-    query = st.text_input("Search Suppliers", placeholder="e.g. Crema, Oak, Lighting...")
+    # Conversational placeholder hint
+    query = st.text_input("Ask the Assistant", placeholder="e.g., Where can I find a black leather couch?")
+    
     if query:
-        terms = query.lower().split()
-        results = [r for r in data if any(t in str(r).lower() for t in terms)]
+        # Process the conversational text into search keywords
+        search_terms = clean_conversational_query(query)
         
-        for item in results:
-            with st.container(border=True):
-                c1, c2 = st.columns([3, 1])
-                with c1:
-                    title = item.get('Supplier Name') or item.get('Brand') or item.get('Product Name') or "Unknown Item"
-                    st.subheader(title)
-                    
-                    category = item.get('Category') or item.get('Type') or 'N/A'
-                    lead_time = item.get('Lead Time') or item.get('Leadtime') or 'N/A'
-                    st.write(f"**Category:** {category} | ⏳ **Lead Time:** {lead_time}")
-                    
-                    # Run the advanced parser
-                    stock_val, email_val, phone_val = extract_clean_details(item)
-                    
-                    st.write(f"📦 **Stock Level:** {stock_val}")
-                    
-                    if email_val != 'N/A':
-                        st.write(f"✉️ **Email:** [{email_val}](mailto:{email_val})")
-                    else:
-                        st.write(f"✉️ **Email:** N/A")
-                        
-                    st.write(f"📞 **Phone:** {phone_val}")
-                    
-                    website = item.get('Website') or item.get('Link')
-                    if website:
-                        st.markdown(f"🔗 [Visit Website]({website})")
-                    
-                with c2:
-                    st.button(
-                        f"➕ Add to {active_project}", 
-                        key=f"a_{title}_{active_project}", 
-                        on_click=add_to_board, 
-                        args=(item, active_project)
-                    )
+        if search_terms:
+            # Smart Matching: Ranks items by how many keywords match the row data
+            scored_results = []
+            for row in data:
+                row_string = str(row).lower()
+                # Count how many of your search terms match this specific row
+                match_count = sum(1 for term in search_terms if term in row_string)
+                if match_count > 0:
+                    scored_results.append((match_count, row))
+            
+            # Sort results so the ones with the highest keyword matches appear first
+            results = [item[1] for item in sorted(scored_results, key=lambda x: x[0], reverse=True)]
+            
+            if results:
+                st.write(f"✨ *I parsed your request down to keywords: `{', '.join(search_terms)}` and found {len(results)} potential matches:*")
+                
+                for item in results:
+                    with st.container(border=True):
+                        c1, c2 = st.columns([3, 1])
+                        with c1:
+                            title = item.get('Supplier Name') or item.get('Brand') or item.get('Product Name') or "Unknown Item"
+                            st.subheader(title)
+                            
+                            category = item.get('Category') or item.get('Type') or 'N/A'
+                            lead_time = item.get('Lead Time') or item.get('Leadtime') or 'N/A'
+                            st.write(f"**Category:** {category} | ⏳ **Lead Time:** {lead_time}")
+                            
+                            # Safely show stock if it exists, default to 'Contact Supplier' instead of N/A
+                            stock_val = item.get('Stock Level') or item.get('Stock') or 'Available to Order'
+                            st.write(f"📦 **Stock/Availability:** {stock_val}")
+                            
+                            email_val = extract_clean_email(item)
+                            if email_val != 'N/A':
+                                st.write(f"✉️ **Email:** [{email_val}](mailto:{email_val})")
+                            
+                            website = item.get('Website') or item.get('Link')
+                            if website:
+                                st.markdown(f"🔗 [Visit Website]({website})")
+                            
+                        with c2:
+                            st.button(
+                                f"➕ Add to {active_project}", 
+                                key=f"a_{title}_{active_project}", 
+                                on_click=add_to_board, 
+                                args=(item, active_project)
+                            )
+            else:
+                st.warning(f"I couldn't find an exact match for `{', '.join(search_terms)}` in your current spreadsheet database. Try adjusting your description terms.")
+        else:
+            st.info("How can I help you source today?")
 
 with tab2:
     st.header(f"🎨 {active_project} Moodboard")
@@ -161,11 +158,12 @@ with tab2:
                     b_title = board_item.get('Supplier Name') or board_item.get('Brand') or board_item.get('Product Name') or "Item"
                     st.write(f"**{b_title}**")
                     
-                    b_stock, b_email, b_phone = extract_clean_details(board_item)
+                    b_stock = board_item.get('Stock Level') or board_item.get('Stock') or 'Available to Order'
+                    b_email = extract_clean_email(board_item)
                     
-                    st.caption(f"📦 Stock: {b_stock}")
-                    st.caption(f"✉️ {b_email}")
-                    st.caption(f"📞 {b_phone}")
+                    st.caption(f"📦 Status: {b_stock}")
+                    if b_email != 'N/A':
+                        st.caption(f"✉️ {b_email}")
         
         st.write("---")
         if st.button(f"🗑️ Clear {active_project}"):
