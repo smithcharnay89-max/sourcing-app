@@ -2,6 +2,8 @@ import streamlit as st
 import gspread
 from google.oauth2.service_account import Credentials
 import re
+import pandas as pd
+from io import StringIO
 
 # 1. Setup
 st.set_page_config(page_title="Design Source Pro", layout="wide")
@@ -12,10 +14,73 @@ creds_dict = st.secrets["gcp_service_account"]
 creds = Credentials.from_service_account_info(creds_dict, scopes=scope)
 client = gspread.authorize(creds)
 SHEET_ID = "16FVZwJEuiFB50Assgdx4weL9HqdO5t1MpYoUPvoEAo8" 
-sheet = client.open_by_key(SHEET_ID).sheet1
+spreadsheet = client.open_by_key(SHEET_ID)
+
+# Tab 1: Catalog Data
+sheet = spreadsheet.sheet1
 data = sheet.get_all_records()
 
-# --- SIMPLIFIED SESSION STATE ---
+# Tab 2: Financial Backups (Ensure this tab exists in your Google Sheet!)
+try:
+    backup_sheet = spreadsheet.worksheet("Financial_Backups")
+except Exception:
+    st.error("⚠️ Database missing the backup layout. Please create a new tab named 'Financial_Backups' in your Google Sheet.")
+
+# --- BACKGROUND DATA PERSISTENCE ENGINE ---
+def sync_ledger_to_cloud(project_name):
+    """Saves the current project finances permanently to Google Sheets instantly."""
+    try:
+        # Clear existing backup entries for this project to overwrite with fresh states
+        all_records = backup_sheet.get_all_records()
+        
+        # We find lines that do NOT belong to this project and keep them
+        rows_to_keep = [["Project", "Name", "Supplier", "Cost", "Qty", "Status"]]
+        for r in all_records:
+            if r.get("Project") != project_name:
+                rows_to_keep.append([r.get("Project"), r.get("Name"), r.get("Supplier"), r.get("Cost"), r.get("Qty"), r.get("Status")])
+        
+        # Append the updated rows for this active project
+        for line in st.session_state.projects[project_name]["financial_ledger"]:
+            # Clean emoji markers or camera icons out of sheet names for clean formatting
+            clean_name = str(line["name"]).replace("📄 ", "").replace("📸 ", "")
+            rows_to_keep.append([
+                project_name,
+                clean_name,
+                line["supplier"],
+                line["cost"],
+                line["qty"],
+                line["status"]
+            ])
+            
+        backup_sheet.clear()
+        backup_sheet.update(range_name="A1", values=rows_to_keep)
+    except Exception as e:
+        pass
+
+def load_ledger_from_cloud():
+    """Initializes and restores financial histories straight from the cloud database."""
+    try:
+        all_records = backup_sheet.get_all_records()
+        for project in st.session_state.projects:
+            saved_lines = []
+            for r in all_records:
+                if r.get("Project") == project:
+                    # Re-attach beautiful visual UI tags depending on historical source definitions
+                    prefix = "📄 " if "Quote" in str(r.get("Supplier")) else ""
+                    saved_lines.append({
+                        "name": f"{prefix}{r.get('Name')}",
+                        "supplier": r.get("Supplier"),
+                        "cost": float(r.get("Cost") or 0.0),
+                        "qty": int(r.get("Qty") or 1),
+                        "status": r.get("Status", "Pending"),
+                        "image_data": None
+                    })
+            if saved_lines:
+                st.session_state.projects[project]["financial_ledger"] = saved_lines
+    except Exception:
+        pass
+
+# --- SESSION STATE INITIALIZATION ---
 if 'projects' not in st.session_state:
     st.session_state.projects = {
         "Main Board": {
@@ -24,6 +89,8 @@ if 'projects' not in st.session_state:
             "budget": 250000.0      
         }
     }
+    # Pull existing logs straight out of Google Cloud instantly on app initialization
+    load_ledger_from_cloud()
 
 # 3. Sidebar for Project Management
 with st.sidebar:
@@ -229,11 +296,10 @@ with tab2:
     else:
         st.info("Your visual moodboard is empty. Clip a link above or save matching assets using the Smart Assistant framework.")
 
-# --- TAB 3: PROJ FINANCES (UPDATED WITH STEP 2 CAMERA INPUT) ---
+# --- TAB 3: PROJ FINANCES (UPDATED WITH STEP 3 AUTOMATED BACKUPS) ---
 with tab3:
     st.header(f"📊 Project Procurement Ledger: {active_project}")
     
-    # Adaptive layout split: stacks vertical automatically on native mobile viewpoints
     col_left, col_right = st.columns([1, 1] if len(st.session_state.projects[active_project]["financial_ledger"]) > 0 else [1, 2])
     
     with col_left:
@@ -253,7 +319,8 @@ with tab3:
                     "image_data": None
                 }
                 st.session_state.projects[active_project]["financial_ledger"].append(new_expense)
-                st.toast(f"Imported {selected_mb_item} into finances!")
+                sync_ledger_to_cloud(active_project) # Instant automated sync
+                st.toast(f"Imported {selected_mb_item} into finances and backed up!")
                 st.rerun()
                 
         with st.expander("💾 Option B: Log Custom/Ad-Hoc Purchase", expanded=False):
@@ -273,12 +340,12 @@ with tab3:
                         "image_data": None
                     }
                     st.session_state.projects[active_project]["financial_ledger"].append(new_custom)
-                    st.toast("Logged custom expense!")
+                    sync_ledger_to_cloud(active_project) # Instant automated sync
+                    st.toast("Logged custom expense and backed up!")
                     st.rerun()
                 else:
                     st.error("Please enter a description.")
         
-        # NEW: STEP 2 INVOICE MODALITY SWITCHER
         with st.expander("⚡ Option C: Capture Quote / Snap Receipt", expanded=True):
             input_mode = st.radio("Capture Method", ["📁 Upload Digital PDF", "📸 Mobile Camera Snap"], horizontal=True)
             
@@ -290,7 +357,8 @@ with tab3:
                             parsed_result = parse_quote_pdf(uploaded_quote)
                             if parsed_result:
                                 st.session_state.projects[active_project]["financial_ledger"].append(parsed_result)
-                                st.toast("Processed quote parameters successfully!")
+                                sync_ledger_to_cloud(active_project) # Instant automated sync
+                                st.toast("Processed quote and backed up parameters!")
                                 st.rerun()
                             else:
                                 st.error("Could not pull structured text lines.")
@@ -298,7 +366,6 @@ with tab3:
                         st.warning("Please upload a PDF document first.")
                         
             else:
-                # Live Native Phone Camera Call Trigger
                 camera_image = st.camera_input("Position the paper receipt clearly in view")
                 cam_expense_name = st.text_input("Receipt Label / Description", placeholder="e.g. Showroom Sample Deposit")
                 cam_expense_supplier = st.text_input("Vendor Name", placeholder="e.g. Hertex Fabrics")
@@ -306,7 +373,6 @@ with tab3:
                 
                 if st.button("💾 Save Camera Snap to Ledger"):
                     if camera_image is not None and cam_expense_name.strip():
-                        # Extract raw binary layout bytes to render a live thumbnail snapshot image
                         img_bytes = camera_image.getvalue()
                         new_camera_entry = {
                             "name": f"📸 {cam_expense_name.strip()}",
@@ -314,10 +380,11 @@ with tab3:
                             "cost": float(cam_expense_cost),
                             "qty": 1,
                             "status": "Paid",
-                            "image_data": img_bytes # Binary frame mapping container
+                            "image_data": img_bytes
                         }
                         st.session_state.projects[active_project]["financial_ledger"].append(new_camera_entry)
-                        st.success("Receipt photo captured and linked successfully!")
+                        sync_ledger_to_cloud(active_project) # Instant automated sync
+                        st.success("Receipt photo captured and mirrored to database!")
                         st.rerun()
                     else:
                         st.error("Please take a snapshot photo and fill out an Expense Label before saving.")
@@ -339,6 +406,30 @@ with tab3:
             m2.metric("Remaining Balance", f"R{remaining_budget:,.2f}", delta="- OVER BUDGET", delta_color="inverse")
             st.error(f"🚨 Allocation warning: Over budget by R{abs(remaining_budget):,.2f}")
             
+        # NEW: STEP 3 - EXCEL MANUAL CSV DUMP BACKUP CONTROLLER
+        if ledger:
+            # Transform ledger lists into a clean pandas data table structure
+            export_df = pd.DataFrame([{
+                "Project": active_project,
+                "Description": str(line["name"]).replace("📄 ", "").replace("📸 ", ""),
+                "Supplier": line["supplier"],
+                "Unit Cost (R)": line["cost"],
+                "Quantity": line["qty"],
+                "Total (R)": line["cost"] * line["qty"],
+                "Status": line["status"]
+            } for line in ledger])
+            
+            # Format to clear text string buffer
+            csv_buffer = export_df.to_csv(index=False)
+            
+            st.download_button(
+                label="📥 Export Ledger to Excel File (.csv)",
+                data=csv_buffer,
+                file_name=f"DesignSourcePro_Backup_{active_project}.csv",
+                mime="text/csv",
+                key="manual_excel_dump_trigger"
+            )
+            
         st.write("---")
         
         if ledger:
@@ -349,7 +440,6 @@ with tab3:
                         st.write(f"**{line['name']}**")
                         st.caption(f"Supplier: {line['supplier']} | Total: R{line['cost']*line['qty']:,.2f}")
                         
-                        # NEW: Dynamic Thumbnail Preview Container if line item has camera input attached
                         if line.get("image_data") is not None:
                             st.image(line["image_data"], width=150, caption="Linked Receipt Image Capture")
                             
@@ -360,16 +450,19 @@ with tab3:
                         
                         if st.button("🗑️ Remove Line", key=f"del_{idx}"):
                             st.session_state.projects[active_project]["financial_ledger"].pop(idx)
+                            sync_ledger_to_cloud(active_project) # Update changes instantly
                             st.rerun()
                             
                     if new_cost != line['cost'] or new_qty != line['qty'] or new_stat != line['status']:
                         st.session_state.projects[active_project]["financial_ledger"][idx]['cost'] = new_cost
                         st.session_state.projects[active_project]["financial_ledger"][idx]['qty'] = new_qty
                         st.session_state.projects[active_project]["financial_ledger"][idx]['status'] = new_stat
+                        sync_ledger_to_cloud(active_project) # Sync inline numerical updates
                         st.rerun()
                         
             if st.button("🗑️ Clear Entire Financial Sheet"):
                 st.session_state.projects[active_project]["financial_ledger"] = []
+                sync_ledger_to_cloud(active_project)
                 st.rerun()
         else:
             st.info("The procurement ledger is clear. Run a digital PDF scan, switch to Mobile Camera Snap mode, or log a custom vendor expense.")
