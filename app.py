@@ -4,10 +4,10 @@ from google.oauth2.service_account import Credentials
 import re
 import pandas as pd
 
-# 1. Setup
+# 1. Page Configuration
 st.set_page_config(page_title="Design Source Pro", layout="wide")
 
-# 2. Connection
+# 2. Database Connection Configuration
 scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
 creds_dict = st.secrets["gcp_service_account"]
 creds = Credentials.from_service_account_info(creds_dict, scopes=scope)
@@ -15,7 +15,7 @@ client = gspread.authorize(creds)
 SHEET_ID = "16FVZwJEuiFB50Assgdx4weL9HqdO5t1MpYoUPvoEAo8" 
 spreadsheet = client.open_by_key(SHEET_ID)
 
-# Tab 1: Catalog Data
+# Tab 1: Catalog Data Master
 sheet = spreadsheet.sheet1
 data = sheet.get_all_records()
 
@@ -104,6 +104,85 @@ if 'projects' not in st.session_state:
 if 'active_project_selection' not in st.session_state:
     st.session_state.active_project_selection = "Main Board"
 
+# Helpers
+def clean_conversational_query(user_query):
+    query_lower = user_query.lower().strip()
+    filler_phrases = [
+        r"where can i find a", r"where can i find", r"do you have any", r"do you have a", 
+        r"looking for a", r"looking for", r"show me", r"i need a", r"i need", 
+        r"can you find", r"please find", r"help me find"
+    ]
+    for phrase in filler_phrases:
+        query_lower = re.sub(phrase, "", query_lower)
+    return [t.strip() for t in query_lower.split() if t.strip() not in ['a', 'an', 'the', 'with', 'in', 'for']]
+
+def extract_clean_email(item_dict):
+    for val in item_dict.values():
+        val_str = str(val).strip()
+        email_match = re.search(r'[\w\.-]+@[\w\.-]+\.\w+', val_str)
+        if email_match:
+            return email_match.group(0)
+    return 'N/A'
+
+def add_to_moodboard(item, project):
+    title = item.get('Supplier Name') or item.get('Brand') or item.get('Product Name') or "Unknown Item"
+    existing = st.session_state.projects[project]["moodboard_items"]
+    if title not in [x.get('title') for x in existing]:
+        st.session_state.projects[project]["moodboard_items"].append({
+            "title": title,
+            "image": item.get('Image Link') or item.get('Image') or item.get('Photo') or "",
+            "category": item.get('Category') or "Catalog Item",
+            "source": item.get('Supplier Name') or "Internal Database"
+        })
+        st.toast(f"Saved {title} to Moodboard!")
+    else:
+        st.toast("ℹ️ Already on your Moodboard")
+
+# Invoice/Quote Parser
+def parse_quote_pdf(file_upload):
+    try:
+        import pdfplumber
+        full_text = ""
+        with pdfplumber.open(file_upload) as pdf:
+            for page in pdf.pages:
+                text = page.extract_text()
+                if text:
+                    full_text += text + "\n"
+                    
+        if not full_text.strip():
+            return None
+            
+        amounts = re.findall(r'(?:R?\s?\d{1,3}(?:[.,\s]\d{3})*(?:[.,]\d{2}))', full_text)
+        clean_amounts = []
+        for amt in amounts:
+            c_amt = amt.replace('R', '').replace(' ', '').replace(',', '')
+            try:
+                val = float(c_amt)
+                if val >= 100.0:
+                    clean_amounts.append(val)
+            except ValueError:
+                continue
+                
+        detected_total = max(clean_amounts) if clean_amounts else 0.0
+        lines = [l.strip() for l in full_text.split('\n') if l.strip()]
+        detected_title = "Imported Supplier Quote"
+        if lines:
+            for line in lines[:3]:
+                if len(line) > 4 and not line.replace('.','').replace(',','').isdigit():
+                    detected_title = line[:30]
+                    break
+        
+        return {
+            "name": f"📄 {detected_title}",
+            "supplier": "PDF Upload Scan",
+            "cost": detected_total,
+            "qty": 1,
+            "status": "Quoted",
+            "image_data": None
+        }
+    except Exception as e:
+        return None
+
 # 3. Sidebar for Project Management
 with st.sidebar:
     st.header("📂 Project Operations")
@@ -126,25 +205,4 @@ with st.sidebar:
     # Track selection changes without dropping state parameters
     available_options = list(st.session_state.projects.keys())
     if st.session_state.active_project_selection not in available_options:
-        st.session_state.active_project_selection = available_options[0]
-        
-    active_project = st.selectbox(
-        "Current Active Project", 
-        options=available_options,
-        index=available_options.index(st.session_state.active_project_selection)
-    )
-    st.session_state.active_project_selection = active_project
-    
-    st.write("---")
-    current_budget = st.number_input(
-        "Set Client Total Budget (R)", 
-        min_value=0.0, 
-        value=float(st.session_state.projects[active_project]["budget"]), 
-        step=5000.0
-    )
-    st.session_state.projects[active_project]["budget"] = current_budget
-
-# Helpers
-def clean_conversational_query(user_query):
-    query_lower = user_query.lower().strip()
-    filler_phrases =
+        st.session_state.active_project
