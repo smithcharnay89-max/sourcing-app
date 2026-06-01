@@ -29,22 +29,41 @@ except Exception:
 
 # --- BACKGROUND DATA PERSISTENCE ENGINE ---
 def sync_ledger_to_cloud(project_name):
-    """Saves the current project finances permanently to Google Sheets instantly."""
+    """Saves the current project finances and the overall live budget calculation directly to Excel."""
     if not backup_sheet_ready:
         return
     try:
         all_records = backup_sheet.get_all_records()
-        rows_to_keep = [["Project", "Name", "Supplier", "Cost", "Qty", "Status"]]
         
-        # Keep histories for other non-active workspaces
+        # 1. Separate out records belonging to other projects so we don't overwrite them
+        other_project_rows = []
         for r in all_records:
-            if r.get("Project") != project_name and r.get("Project"):
-                rows_to_keep.append([r.get("Project"), r.get("Name"), r.get("Supplier"), r.get("Cost"), r.get("Qty"), r.get("Status")])
+            # We skip rows that look like summary boxes or row headers
+            if r.get("Project") and r.get("Project") != project_name and "BUDGET SUMMARY" not in str(r.get("Project")):
+                other_project_rows.append([
+                    r.get("Project"), r.get("Name"), r.get("Supplier"), 
+                    r.get("Cost"), r.get("Qty"), r.get("Status")
+                ])
+        
+        # 2. Calculate values for our current active project workspace
+        active_ledger = st.session_state.projects[project_name]["financial_ledger"]
+        budget_limit = float(st.session_state.projects[project_name]["budget"])
+        total_spent = sum(float(line['cost'] or 0.0) * int(line['qty'] or 1) for line in active_ledger)
+        remaining_balance = budget_limit - total_spent
+        
+        # 3. Construct the clean layout for the Google Sheet
+        new_sheet_data = [
+            ["--- BUDGET SUMMARY ---", f"ACTIVE WORKSPACE: {project_name}", "", "", "", ""],
+            ["Total Allocated Client Budget:", budget_limit, "", "", "", ""],
+            ["Total Active Funds Spent:", total_spent, "Remaining Project Balance:", remaining_balance, "", ""],
+            ["", "", "", "", "", ""], # Clean spacing row
+            ["Project", "Name", "Supplier", "Cost", "Qty", "Status"] # Main Ledger Header
+        ]
         
         # Append updated rows for this active workspace
-        for line in st.session_state.projects[project_name]["financial_ledger"]:
+        for line in active_ledger:
             clean_name = str(line["name"]).replace("📄 ", "").replace("📸 ", "")
-            rows_to_keep.append([
+            new_sheet_data.append([
                 project_name,
                 clean_name,
                 line["supplier"],
@@ -53,14 +72,17 @@ def sync_ledger_to_cloud(project_name):
                 line["status"]
             ])
             
+        # Append the rest of your historic project rows safely back to the bottom
+        for row in other_project_rows:
+            new_sheet_data.append(row)
+            
         backup_sheet.clear()
-        backup_sheet.update(range_name="A1", values=rows_to_keep)
+        backup_sheet.update(range_name="A1", values=new_sheet_data)
     except Exception:
         pass
 
 def discover_and_load_all_projects():
     """Scans the entire database to register all historic project workspaces instantly."""
-    # Always guarantee baseline defaults are registered
     base_structure = {
         "Main Board": {"moodboard_items": [], "financial_ledger": [], "budget": 250000.0},
         "Project Llandudno": {"moodboard_items": [], "financial_ledger": [], "budget": 1000000.0}
@@ -72,20 +94,35 @@ def discover_and_load_all_projects():
     try:
         all_records = backup_sheet.get_all_records()
         
-        # 1. Dynamically discover every unique project name saved in your sheet rows
+        # 1. Read through values to update client project budgets if they exist in the sheet summary
+        for idx, row in enumerate(all_records):
+            p_header = str(row.get("Project", ""))
+            if "ACTIVE WORKSPACE:" in p_header:
+                discovered_name = p_header.split("ACTIVE WORKSPACE:")[-1].strip()
+                try:
+                    # The next row in the sheet contains the budget value in column B (the second element)
+                    budget_row = all_records[idx + 1]
+                    budget_val = float(list(budget_row.values())[1] or 0.0)
+                    if discovered_name in base_structure:
+                        base_structure[discovered_name]["budget"] = budget_val
+                    else:
+                        base_structure[discovered_name] = {"moodboard_items": [], "financial_ledger": [], "budget": budget_val}
+                except Exception:
+                    pass
+
+        # 2. Dynamically discover any other unique project rows
         for r in all_records:
             p_name = r.get("Project")
-            if p_name and p_name not in base_structure:
+            if p_name and p_name not in base_structure and "BUDGET SUMMARY" not in str(p_name):
                 base_structure[p_name] = {"moodboard_items": [], "financial_ledger": [], "budget": 100000.0}
                 
-        # 2. Re-populate ledger values into their respective dynamic workspaces
+        # 3. Re-populate ledger values into their respective dynamic workspaces
         for r in all_records:
             p_name = r.get("Project")
-            if p_name in base_structure:
+            if p_name in base_structure and "BUDGET SUMMARY" not in str(p_name):
                 supplier_str = str(r.get("Supplier", ""))
                 prefix = "📄 " if "PDF" in supplier_str or "Scan" in supplier_str else ""
                 
-                # Check for duplicates before appending
                 existing_ledger = base_structure[p_name]["financial_ledger"]
                 item_name = f"{prefix}{r.get('Name')}"
                 if not any(item['name'] == item_name and item['supplier'] == r.get('Supplier') for item in existing_ledger):
@@ -205,7 +242,6 @@ with st.sidebar:
             
     st.write("---")
     
-    # Safety Check: If memory got wiped, restore defaults instantly
     if not st.session_state.projects:
         st.session_state.projects = {
             "Main Board": {"moodboard_items": [], "financial_ledger": [], "budget": 250000.0},
@@ -230,7 +266,12 @@ with st.sidebar:
         value=float(st.session_state.projects[active_project]["budget"]), 
         step=5000.0
     )
-    st.session_state.projects[active_project]["budget"] = current_budget
+    
+    # If the user edits the budget slider, sync it up to the Excel data engine immediately
+    if current_budget != st.session_state.projects[active_project]["budget"]:
+        st.session_state.projects[active_project]["budget"] = current_budget
+        sync_ledger_to_cloud(active_project)
+        st.rerun()
 
 # --- MAIN APP INTERFACE ---
 st.title("🏛️ Design Source Pro")
