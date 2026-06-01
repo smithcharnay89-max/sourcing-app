@@ -66,7 +66,7 @@ def sync_ledger_to_cloud(project_name):
                 project_name,
                 clean_name,
                 line["supplier"],
-                line["cost"],
+                line["cost"],  # Fixed column alignment position
                 line["qty"],
                 line["status"]
             ])
@@ -91,14 +91,13 @@ def discover_and_load_all_projects():
         return base_structure
         
     try:
-        # FIX: Explicitly target head=5 so gspread reads from your table header layout!
         all_records = backup_sheet.get_all_records(expected_headers=[], head=5)
         
         # 1. Dynamically discover any unique project rows
         for r in all_records:
             p_name = r.get("Project")
             if p_name and p_name not in base_structure and "BUDGET SUMMARY" not in str(p_name):
-                base_structure[p_name] = {"moodboard_items": [], "financial_ledger": [], "budget": 100000.0}
+                base_structure[p_name] = {"moodboard_items": [], "financial_ledger": [], "budget": 1000000.0}
                 
         # 2. Re-populate ledger values into their respective dynamic workspaces
         for r in all_records:
@@ -218,7 +217,7 @@ with st.sidebar:
             st.session_state.projects[proj_title] = {
                 "moodboard_items": [],
                 "financial_ledger": [],
-                "budget": 100000.0
+                "budget": 1000000.0
             }
             st.session_state.active_project_selection = proj_title
             st.success(f"Created '{proj_title}'")
@@ -345,7 +344,7 @@ with tab3:
                 sync_ledger_to_cloud(active_project)
                 st.rerun()
                 
-        with st.expander("💾 Option B: Log Custom Purchase", expanded=False):
+        with st.expander("💾 Option B: Log Custom Purchase", expanded=True):
             c_name = st.text_input("Description")
             c_supplier = st.text_input("Supplier")
             c_cost = st.number_input("Unit Cost (R)", min_value=0.0, step=100.0)
@@ -360,7 +359,7 @@ with tab3:
                     sync_ledger_to_cloud(active_project)
                     st.rerun()
         
-        with st.expander("⚡ Option C: Capture Quote / Snap Receipt", expanded=True):
+        with st.expander("⚡ Option C: Capture Quote / Snap Receipt", expanded=False):
             input_mode = st.radio("Capture Method", ["📁 Upload Digital PDF", "📸 Mobile Camera Snap"], horizontal=True)
             if input_mode == "📁 Upload Digital PDF":
                 uploaded_quote = st.file_uploader("Upload Supplier PDF Document", type=["pdf"])
