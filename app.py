@@ -80,18 +80,23 @@ def extract_clean_email(item_dict):
 def add_to_moodboard(item, project):
     title = item.get('Supplier Name') or item.get('Brand') or item.get('Product Name') or "Unknown Item"
     existing = st.session_state.projects[project]["moodboard_items"]
-    if title not in [x.get('Supplier Name') or x.get('Brand') or x.get('Product Name') for x in existing]:
-        st.session_state.projects[project]["moodboard_items"].append(item)
+    # Identify items safely using unique keys
+    if title not in [x.get('title') for x in existing]:
+        st.session_state.projects[project]["moodboard_items"].append({
+            "title": title,
+            "image": item.get('Image Link') or item.get('Image') or item.get('Photo') or "",
+            "category": item.get('Category') or "Catalog Item",
+            "source": item.get('Supplier Name') or "Internal Database"
+        })
         st.toast(f"Saved {title} to Moodboard!")
     else:
         st.toast("ℹ️ Already on your Moodboard")
 
-# FINALISED INVOICE PARSING ENGINE
+# Invoice/Quote Parser
 def parse_quote_pdf(file_upload):
     try:
         import pdfplumber
         full_text = ""
-        
         with pdfplumber.open(file_upload) as pdf:
             for page in pdf.pages:
                 text = page.extract_text(layout=True)
@@ -101,21 +106,18 @@ def parse_quote_pdf(file_upload):
         if not full_text.strip():
             return None
             
-        # Refined regex pattern to match both standard currency strings and raw decimal totals
         amounts = re.findall(r'(?:R?\s?\d{1,3}(?:[.,\s]\d{3})*(?:[.,]\d{2}))', full_text)
-        
         clean_amounts = []
         for amt in amounts:
             c_amt = amt.replace('R', '').replace(' ', '').replace(',', '')
             try:
                 val = float(c_amt)
-                if val >= 100.0: # Excludes layout page counts or item quantities
+                if val >= 100.0:
                     clean_amounts.append(val)
             except ValueError:
                 continue
                 
         detected_total = max(clean_amounts) if clean_amounts else 0.0
-        
         lines = [l.strip() for l in full_text.split('\n') if l.strip()]
         detected_title = "Imported Supplier Quote"
         if lines:
@@ -166,9 +168,7 @@ with tab1:
                             title = item.get('Supplier Name') or item.get('Brand') or item.get('Product Name') or "Unknown Item"
                             st.subheader(title)
                             st.write(f"**Category:** {item.get('Category', 'N/A')} | ⏳ **Lead Time:** {item.get('Lead Time', 'N/A')}")
-                            
-                            stock_val = item.get('Stock Level') or item.get('Stock') or 'Available to Order'
-                            st.write(f"📦 **Availability:** {stock_val}")
+                            st.write(f"📦 **Availability:** {item.get('Stock Level') or item.get('Stock') or 'Available to Order'}")
                             
                             email_val = extract_clean_email(item)
                             if email_val != 'N/A':
@@ -176,51 +176,79 @@ with tab1:
                         with c2:
                             st.button(f"➕ Save to Board", key=f"src_{title}_{active_project}", on_click=add_to_moodboard, args=(item, active_project))
 
-# --- TAB 2: VISUAL MOODBOARD ---
+# --- TAB 2: VISUAL MOODBOARD (UPDATED WITH STEP 1 CLIPPER) ---
 with tab2:
     st.header(f"🎨 Visual Moodboard: {active_project}")
-    board_items = st.session_state.projects[active_project]["moodboard_items"]
     
+    # NEW: Web Inspiration Clipper Panel
+    with st.expander("🔗 Clip Web Inspiration (Pinterest, Web Links, etc.)", expanded=True):
+        col_clip1, col_clip2 = st.columns([2, 1])
+        with col_clip1:
+            web_img_url = st.text_input("Paste Image Address URL", placeholder="https://pinterest.com/pin/example.jpg or any web image link...")
+        with col_clip2:
+            web_img_title = st.text_input("Inspiration Label", placeholder="e.g., Llandudno Lounge Concept")
+            web_img_cat = st.text_input("Category Type", placeholder="e.g., Lighting, Textures")
+            
+        if st.button("📌 Pin to Moodboard"):
+            if web_img_url.strip() and web_img_title.strip():
+                new_pin = {
+                    "title": web_img_title.strip(),
+                    "image": web_img_url.strip(),
+                    "category": web_img_cat.strip() if web_img_cat.strip() else "Web Inspiration",
+                    "source": "Web Clipper"
+                }
+                st.session_state.projects[active_project]["moodboard_items"].append(new_pin)
+                st.success(f"Pinned '{web_img_title}' securely to your active project!")
+                st.preload = True
+                st.rerun()
+            else:
+                st.error("Please provide both an Image URL address and a clear Inspiration Label description.")
+
+    st.write("---")
+    
+    # Dynamic Layout Matrix Renderer
+    board_items = st.session_state.projects[active_project]["moodboard_items"]
     if board_items:
         cols = st.columns(3)
         for idx, board_item in enumerate(board_items):
             with cols[idx % 3]:
                 with st.container(border=True):
-                    img_url = board_item.get('Image Link') or board_item.get('Image') or board_item.get('Photo')
-                    cat = board_item.get('Category') or 'Item'
+                    img_url = board_item.get('image', '').strip()
+                    cat = board_item.get('category', 'Item')
+                    title_text = board_item.get('title', 'Selection')
+                    source_info = board_item.get('source', 'Unknown Source')
                     
                     if not img_url:
                         st.markdown(f"<div style='background-color:#EAE6DF; padding:40px; text-align:center; border-radius:5px;'><h3>🛋️</h3><small style='color:#666;'>{cat.upper()}</small></div>", unsafe_allow_html=True)
                     else:
                         st.image(img_url, use_container_width=True)
                     
-                    title_text = board_item.get('Supplier Name') or board_item.get('Brand') or board_item.get('Product Name') or "Selection"
                     st.write(f"**{title_text}**")
+                    st.caption(f"🏷️ Category: {cat} | 📍 Origin: {source_info}")
                     
-                    email_val = extract_clean_email(board_item)
-                    if email_val != 'N/A':
-                        st.caption(f"✉️ {email_val}")
+                    if st.button("🗑️ Remove Pin", key=f"remove_pin_{idx}_{active_project}"):
+                        st.session_state.projects[active_project]["moodboard_items"].pop(idx)
+                        st.rerun()
     else:
-        st.info("Your moodboard is currently empty. Use the Smart Assistant tab to find and add items.")
+        st.info("Your visual moodboard is empty. Clip a link above or save matching assets using the Smart Assistant framework.")
 
-# --- TAB 3: INDEPENDENT FINANCES & PDF SCANNING ---
+# --- TAB 3: PROJ FINANCES ---
 with tab3:
     st.header(f"📊 Project Procurement Ledger: {active_project}")
-    
     col_left, col_right = st.columns([1, 2])
     
     with col_left:
         st.subheader("➕ Add Expenses")
         
         st.markdown("**Option A: Import From Moodboard**")
-        mb_options = [item.get('Supplier Name') or item.get('Brand') or item.get('Product Name') for item in board_items]
+        mb_options = [item.get('title') for item in board_items]
         selected_mb_item = st.selectbox("Select saved item to pull into finances", options=["-- Select Item --"] + mb_options)
         if st.button("📥 Import Item to Ledger") and selected_mb_item != "-- Select Item --":
-            target_item = next(item for item in board_items if (item.get('Supplier Name') or item.get('Brand') or item.get('Product Name')) == selected_mb_item)
+            target_item = next(item for item in board_items if item.get('title') == selected_mb_item)
             new_expense = {
                 "name": selected_mb_item,
-                "supplier": target_item.get('Category') or "Catalog Item",
-                "cost": float(target_item.get('Price') or target_item.get('Unit Cost') or 0.0),
+                "supplier": target_item.get('source', 'Catalog Item'),
+                "cost": 0.0,  # Web links don't carry native structured spreadsheet pricing
                 "qty": 1,
                 "status": "Pending"
             }
