@@ -29,7 +29,7 @@ except Exception:
 
 # --- BACKGROUND DATA PERSISTENCE ENGINE ---
 def sync_ledger_to_cloud(project_name):
-    """Saves the current project finances and the overall live budget calculation directly to Excel."""
+    """Saves records to the sheet and injects isolated formulas that only add up the active project's rows."""
     if not backup_sheet_ready:
         return
     try:
@@ -45,17 +45,15 @@ def sync_ledger_to_cloud(project_name):
                     r.get("Cost"), r.get("Qty"), r.get("Status")
                 ])
         
-        # 2. Calculate values for our current active project workspace
+        # 2. Compile our active workspace rows
         active_ledger = st.session_state.projects[project_name]["financial_ledger"]
-        budget_limit = float(st.session_state.projects[project_name]["budget"])
-        total_spent = sum(float(line['cost'] or 0.0) * int(line['qty'] or 1) for line in active_ledger)
-        remaining_balance = budget_limit - total_spent
         
-        # 3. Construct the clean layout for the Google Sheet
+        # Build layout data block
         new_sheet_data = [
             ["--- BUDGET SUMMARY ---", f"ACTIVE WORKSPACE: {project_name}", "", "", "", ""],
-            ["Total Allocated Client Budget:", budget_limit, "", "", "", ""],
-            ["Total Active Funds Spent:", total_spent, "Remaining Project Balance:", remaining_balance, "", ""],
+            ["Total Allocated Client Budget:", float(st.session_state.projects[project_name]["budget"]), "", "", "", ""],
+            # FIX: Swapped SUMPRODUCT for a project-isolated SUMPRODUCT array filter so Excel calculates row-by-row matching Project names
+            ["Total Active Funds Spent:", f'=SUMPRODUCT(--(A6:A100="{project_name}"), D6:D100, E6:E100)', "Remaining Project Balance:", '=B2-B3', "", ""],
             ["", "", "", "", "", ""], 
             ["Project", "Name", "Supplier", "Cost", "Qty", "Status"] # Row 5 Headers
         ]
@@ -67,8 +65,8 @@ def sync_ledger_to_cloud(project_name):
                 str(project_name),
                 str(clean_name),
                 str(line["supplier"]),
-                float(line["cost"] or 0.0), # Firm slot 4 placement
-                int(line["qty"] or 1),       # Firm slot 5 placement
+                float(line["cost"] or 0.0),
+                int(line["qty"] or 1),
                 str(line["status"])
             ])
             
@@ -85,7 +83,8 @@ def discover_and_load_all_projects():
     """Scans the sheet columns starting explicitly at row 5 to reload lists onto the browser."""
     base_structure = {
         "Main Board": {"moodboard_items": [], "financial_ledger": [], "budget": 250000.0},
-        "Project Llandudno": {"moodboard_items": [], "financial_ledger": [], "budget": 1000000.0}
+        "Project Llandudno": {"moodboard_items": [], "financial_ledger": [], "budget": 1000000.0},
+        "Project Welgemoed": {"moodboard_items": [], "financial_ledger": [], "budget": 1000000.0}
     }
     
     if not backup_sheet_ready:
@@ -94,7 +93,7 @@ def discover_and_load_all_projects():
     try:
         all_records = backup_sheet.get_all_records(expected_headers=[], head=5)
         
-        # 1. Dynamically discover any unique project rows
+        # 1. Dynamically discover any unique project rows inside Column A
         for r in all_records:
             p_name = r.get("Project")
             if p_name and p_name not in base_structure and "BUDGET SUMMARY" not in str(p_name):
@@ -439,4 +438,4 @@ with tab3:
                             if st.button("🗑️ Remove", key=f"del_{idx}_{active_project}"):
                                 st.session_state.projects[active_project]["financial_ledger"].pop(idx)
                                 sync_ledger_to_cloud(active_project)
-                                st.rerun()
+                                rerun()
