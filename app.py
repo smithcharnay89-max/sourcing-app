@@ -19,50 +19,38 @@ spreadsheet = client.open_by_key(SHEET_ID)
 sheet = spreadsheet.sheet1
 data = sheet.get_all_records()
 
-# Tab 2: Financial Backups Configuration
-backup_sheet_ready = False
-try:
-    backup_sheet = spreadsheet.worksheet("Financial_Backups")
-    backup_sheet_ready = True
-except Exception:
-    st.error("⚠️ Cloud Sync Warning: Please create a tab named 'Financial_Backups' in your Google Sheet to activate auto-saving.")
-
-# --- BACKGROUND DATA PERSISTENCE ENGINE ---
+# --- BACKGROUND DATA PERSISTENCE ENGINE (MULTI-TAB ARCHITECTURE) ---
 def sync_ledger_to_cloud(project_name):
-    """Saves records to the sheet and injects isolated formulas that only add up the active project's rows."""
-    if not backup_sheet_ready:
-        return
+    """Saves records to a dedicated worksheet tab named after the project itself."""
     try:
-        # Pull records using explicit Head=5 to avoid touching summary rows
-        all_records = backup_sheet.get_all_records(expected_headers=[], head=5)
+        # Sanitize name to make sure it's a valid Google Sheets tab title
+        tab_title = str(project_name).strip()[:30]
         
-        # 1. Separate out records belonging to other projects so we don't overwrite them
-        other_project_rows = []
-        for r in all_records:
-            if r.get("Project") and r.get("Project") != project_name and "BUDGET SUMMARY" not in str(r.get("Project")):
-                other_project_rows.append([
-                    r.get("Project"), r.get("Name"), r.get("Supplier"), 
-                    r.get("Cost"), r.get("Qty"), r.get("Status")
-                ])
-        
-        # 2. Compile our active workspace rows
+        # Open the worksheet if it exists, or dynamically create a brand-new tab if it doesn't
+        try:
+            worksheet = spreadsheet.worksheet(tab_title)
+        except gspread.exceptions.WorksheetNotFound:
+            worksheet = spreadsheet.add_worksheet(title=tab_title, rows="100", cols="10")
+            
         active_ledger = st.session_state.projects[project_name]["financial_ledger"]
+        budget_limit = float(st.session_state.projects[project_name]["budget"])
+        total_spent = sum(float(line['cost'] or 0.0) * int(line['qty'] or 1) for line in active_ledger)
+        remaining_balance = budget_limit - total_spent
         
-        # Build layout data block
-        new_sheet_data = [
-            ["--- BUDGET SUMMARY ---", f"ACTIVE WORKSPACE: {project_name}", "", "", "", ""],
-            ["Total Allocated Client Budget:", float(st.session_state.projects[project_name]["budget"]), "", "", "", ""],
-            # FIX: Swapped SUMPRODUCT for a project-isolated SUMPRODUCT array filter so Excel calculates row-by-row matching Project names
-            ["Total Active Funds Spent:", f'=SUMPRODUCT(--(A6:A100="{project_name}"), D6:D100, E6:E100)', "Remaining Project Balance:", '=B2-B3', "", ""],
+        # Structure a beautiful, presentation-ready client invoice layout
+        sheet_layout = [
+            ["--- BUDGET SUMMARY ---", f"CLIENT WORKSPACE: {tab_title}", "", "", "", ""],
+            ["Total Allocated Budget:", budget_limit, "", "", "", ""],
+            ["Total Funds Allocated Spent:", total_spent, "Remaining Project Balance:", remaining_balance, "", ""],
             ["", "", "", "", "", ""], 
-            ["Project", "Name", "Supplier", "Cost", "Qty", "Status"] # Row 5 Headers
+            ["Project Workspace", "Item Description", "Supplier / Vendor", "Unit Cost (R)", "Quantity", "Approval Status"]
         ]
         
-        # Append updated rows for this active workspace with strict positioning values
+        # Append rows strictly isolated to this sheet tab
         for line in active_ledger:
             clean_name = str(line["name"]).replace("📄 ", "").replace("📸 ", "")
-            new_sheet_data.append([
-                str(project_name),
+            sheet_layout.append([
+                tab_title,
                 str(clean_name),
                 str(line["supplier"]),
                 float(line["cost"] or 0.0),
@@ -70,53 +58,66 @@ def sync_ledger_to_cloud(project_name):
                 str(line["status"])
             ])
             
-        # Append the rest of your historic project rows safely back to the bottom
-        for row in other_project_rows:
-            new_sheet_data.append(row)
-            
-        backup_sheet.clear()
-        backup_sheet.update(range_name="A1", values=new_sheet_data)
+        worksheet.clear()
+        worksheet.update(range_name="A1", values=sheet_layout)
     except Exception:
         pass
 
 def discover_and_load_all_projects():
-    """Scans the sheet columns starting explicitly at row 5 to reload lists onto the browser."""
+    """Discovers all projects dynamically by scanning every separate tab title inside your sheet file."""
     base_structure = {
         "Main Board": {"moodboard_items": [], "financial_ledger": [], "budget": 250000.0},
         "Project Llandudno": {"moodboard_items": [], "financial_ledger": [], "budget": 1000000.0},
         "Project Welgemoed": {"moodboard_items": [], "financial_ledger": [], "budget": 1000000.0}
     }
     
-    if not backup_sheet_ready:
-        return base_structure
-        
     try:
-        all_records = backup_sheet.get_all_records(expected_headers=[], head=5)
+        # Scan through all available tabs inside the Google Sheet document
+        all_worksheets = spreadsheet.worksheets()
         
-        # 1. Dynamically discover any unique project rows inside Column A
-        for r in all_records:
-            p_name = r.get("Project")
-            if p_name and p_name not in base_structure and "BUDGET SUMMARY" not in str(p_name):
-                base_structure[p_name] = {"moodboard_items": [], "financial_ledger": [], "budget": 1000000.0}
+        for ws in all_worksheets:
+            title = ws.title
+            # Ignore sheet1 (the master catalog)
+            if title == sheet.title:
+                continue
                 
-        # 2. Re-populate ledger values into their respective dynamic workspaces
-        for r in all_records:
-            p_name = r.get("Project")
-            if p_name in base_structure and "BUDGET SUMMARY" not in str(p_name):
-                supplier_str = str(r.get("Supplier", ""))
-                prefix = "📄 " if "PDF" in supplier_str or "Scan" in supplier_str else ""
+            try:
+                # Read the historical entries safely from Row 5 downwards for each tab
+                records = ws.get_all_records(expected_headers=[], head=5)
                 
-                existing_ledger = base_structure[p_name]["financial_ledger"]
-                item_name = f"{prefix}{r.get('Name')}"
-                if not any(item['name'] == item_name and item['supplier'] == r.get('Supplier') for item in existing_ledger):
-                    base_structure[p_name]["financial_ledger"].append({
-                        "name": item_name,
-                        "supplier": r.get("Supplier"),
-                        "cost": float(r.get("Cost") or 0.0),
-                        "qty": int(r.get("Qty") or 1),
-                        "status": r.get("Status", "Pending"),
-                        "image_data": None
-                    })
+                # Dynamic tab configuration registration
+                if title not in base_structure:
+                    base_structure[title] = {"moodboard_items": [], "financial_ledger": [], "budget": 100000.0}
+                
+                # Extract historical client budget numbers directly from cell B2 if present
+                try:
+                    raw_rows = ws.get_all_values()
+                    if len(raw_rows) >= 2 and raw_rows[1][1]:
+                        base_structure[title]["budget"] = float(raw_rows[1][1])
+                except Exception:
+                    pass
+                    
+                for r in records:
+                    desc = r.get("Item Description") or r.get("Name")
+                    if desc:
+                        supplier_str = str(r.get("Supplier / Vendor") or r.get("Supplier", ""))
+                        prefix = "📄 " if "PDF" in supplier_str or "Scan" in supplier_str else ""
+                        
+                        existing_ledger = base_structure[title]["financial_ledger"]
+                        item_name = f"{prefix}{desc}"
+                        
+                        if not any(item['name'] == item_name for item in existing_ledger):
+                            base_structure[title]["financial_ledger"].append({
+                                "name": item_name,
+                                "supplier": r.get("Supplier / Vendor") or r.get("Supplier") or "Unknown",
+                                "cost": float(r.get("Unit Cost (R)") or r.get("Cost") or 0.0),
+                                "qty": int(r.get("Quantity") or r.get("Qty") or 1),
+                                "status": r.get("Approval Status") or r.get("Status") or "Pending",
+                                "image_data": None
+                            })
+            except Exception:
+                continue
+                
         return base_structure
     except Exception:
         return base_structure
@@ -220,7 +221,8 @@ with st.sidebar:
                 "budget": 1000000.0
             }
             st.session_state.active_project_selection = proj_title
-            st.success(f"Created '{proj_title}'")
+            sync_ledger_to_cloud(proj_title) # Create the tab instantly
+            st.success(f"Created '{proj_title}' Workspace Tab!")
             st.rerun()
             
     st.write("---")
@@ -251,7 +253,7 @@ with st.sidebar:
 
 # --- MAIN APP INTERFACE ---
 st.title("🏛️ Design Source Pro")
-st.caption(f"📍 Managing: **{active_project}**")
+st.caption(f"📍 Active Tab Workspace: **{active_project}**")
 
 tab1, tab2, tab3 = st.tabs(["🔎 Smart Assistant", "🎨 Project Moodboard", "📊 Project Finances"])
 
@@ -438,4 +440,4 @@ with tab3:
                             if st.button("🗑️ Remove", key=f"del_{idx}_{active_project}"):
                                 st.session_state.projects[active_project]["financial_ledger"].pop(idx)
                                 sync_ledger_to_cloud(active_project)
-                                rerun()
+                                st.rerun()
