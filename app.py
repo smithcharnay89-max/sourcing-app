@@ -84,14 +84,19 @@ def discover_and_load_all_projects():
             if p_name in base_structure:
                 supplier_str = str(r.get("Supplier", ""))
                 prefix = "📄 " if "PDF" in supplier_str or "Scan" in supplier_str else ""
-                base_structure[p_name]["financial_ledger"].append({
-                    "name": f"{prefix}{r.get('Name')}",
-                    "supplier": r.get("Supplier"),
-                    "cost": float(r.get("Cost") or 0.0),
-                    "qty": int(r.get("Qty") or 1),
-                    "status": r.get("Status", "Pending"),
-                    "image_data": None
-                })
+                
+                # Check for duplicates before appending
+                existing_ledger = base_structure[p_name]["financial_ledger"]
+                item_name = f"{prefix}{r.get('Name')}"
+                if not any(item['name'] == item_name and item['supplier'] == r.get('Supplier') for item in existing_ledger):
+                    base_structure[p_name]["financial_ledger"].append({
+                        "name": item_name,
+                        "supplier": r.get("Supplier"),
+                        "cost": float(r.get("Cost") or 0.0),
+                        "qty": int(r.get("Qty") or 1),
+                        "status": r.get("Status", "Pending"),
+                        "image_data": None
+                    })
         return base_structure
     except Exception:
         return base_structure
@@ -100,7 +105,6 @@ def discover_and_load_all_projects():
 if 'projects' not in st.session_state:
     st.session_state.projects = discover_and_load_all_projects()
 
-# Persistent dynamic selection helper
 if 'active_project_selection' not in st.session_state:
     st.session_state.active_project_selection = "Main Board"
 
@@ -138,7 +142,6 @@ def add_to_moodboard(item, project):
     else:
         st.toast("ℹ️ Already on your Moodboard")
 
-# Invoice/Quote Parser
 def parse_quote_pdf(file_upload):
     try:
         import pdfplumber
@@ -202,7 +205,212 @@ with st.sidebar:
             
     st.write("---")
     
-    # Track selection changes without dropping state parameters
+    # Safety Check: If memory got wiped, restore defaults instantly
+    if not st.session_state.projects:
+        st.session_state.projects = {
+            "Main Board": {"moodboard_items": [], "financial_ledger": [], "budget": 250000.0},
+            "Project Llandudno": {"moodboard_items": [], "financial_ledger": [], "budget": 1000000.0}
+        }
+        
     available_options = list(st.session_state.projects.keys())
     if st.session_state.active_project_selection not in available_options:
-        st.session_state.active_project
+        st.session_state.active_project_selection = available_options[0]
+        
+    active_project = st.selectbox(
+        "Current Active Project", 
+        options=available_options,
+        index=available_options.index(st.session_state.active_project_selection)
+    )
+    st.session_state.active_project_selection = active_project
+    
+    st.write("---")
+    current_budget = st.number_input(
+        "Set Client Total Budget (R)", 
+        min_value=0.0, 
+        value=float(st.session_state.projects[active_project]["budget"]), 
+        step=5000.0
+    )
+    st.session_state.projects[active_project]["budget"] = current_budget
+
+# --- MAIN APP INTERFACE ---
+st.title("🏛️ Design Source Pro")
+st.caption(f"📍 Managing: **{active_project}**")
+
+tab1, tab2, tab3 = st.tabs(["🔎 Smart Assistant", "🎨 Project Moodboard", "📊 Project Finances"])
+
+# --- TAB 1: SMART ASSISTANT ---
+with tab1:
+    query = st.text_input("Ask the Assistant", placeholder="e.g., Where can I find a black leather couch?")
+    if query:
+        search_terms = clean_conversational_query(query)
+        if search_terms:
+            scored_results = []
+            for row in data:
+                row_string = str(row).lower()
+                match_count = sum(1 for term in search_terms if term in row_string)
+                if match_count > 0:
+                    scored_results.append((match_count, row))
+            
+            results = [item[1] for item in sorted(scored_results, key=lambda x: x[0], reverse=True)]
+            if results:
+                for item in results:
+                    with st.container(border=True):
+                        c1, c2 = st.columns([3, 1])
+                        with c1:
+                            title = item.get('Supplier Name') or item.get('Brand') or item.get('Product Name') or "Unknown Item"
+                            st.subheader(title)
+                            st.write(f"**Category:** {item.get('Category', 'N/A')} | ⏳ **Lead Time:** {item.get('Lead Time', 'N/A')}")
+                            st.write(f"📦 **Availability:** {item.get('Stock Level') or 'Available to Order'}")
+                            email_val = extract_clean_email(item)
+                            if email_val != 'N/A':
+                                st.write(f"✉️ **Email:** [{email_val}](mailto:{email_val})")
+                        with c2:
+                            st.button(f"➕ Save to Board", key=f"src_{title}_{active_project}", on_click=add_to_moodboard, args=(item, active_project))
+
+# --- TAB 2: VISUAL MOODBOARD ---
+with tab2:
+    st.header(f"🎨 Visual Moodboard: {active_project}")
+    with st.expander("🔗 Clip Web Inspiration (Pinterest, Web Links, etc.)", expanded=False):
+        col_clip1, col_clip2 = st.columns([2, 1])
+        with col_clip1:
+            web_img_url = st.text_input("Paste Image Address URL", placeholder="https://pinterest.com/pin/example.jpg")
+        with col_clip2:
+            web_img_title = st.text_input("Inspiration Label", placeholder="e.g., Lounge Concept")
+            web_img_cat = st.text_input("Category Type", placeholder="e.g., Furniture")
+            
+        if st.button("📌 Pin to Moodboard"):
+            if web_img_url.strip() and web_img_title.strip():
+                st.session_state.projects[active_project]["moodboard_items"].append({
+                    "title": web_img_title.strip(),
+                    "image": web_img_url.strip(),
+                    "category": web_img_cat.strip() if web_img_cat.strip() else "Web Inspiration",
+                    "source": "Web Clipper"
+                })
+                st.success(f"Pinned '{web_img_title}' successfully!")
+                st.rerun()
+
+    st.write("---")
+    board_items = st.session_state.projects[active_project]["moodboard_items"]
+    if board_items:
+        cols = st.columns(3)
+        for idx, board_item in enumerate(board_items):
+            with cols[idx % 3]:
+                with st.container(border=True):
+                    if board_item.get('image'):
+                        st.image(board_item['image'], use_container_width=True)
+                    st.write(f"**{board_item.get('title')}**")
+                    st.caption(f"🏷️ {board_item.get('category')} | 📍 {board_item.get('source')}")
+                    if st.button("🗑️ Remove Pin", key=f"rm_pin_{idx}_{active_project}"):
+                        st.session_state.projects[active_project]["moodboard_items"].pop(idx)
+                        st.rerun()
+    else:
+        st.info("Your visual moodboard is empty.")
+
+# --- TAB 3: PROJ FINANCES ---
+with tab3:
+    st.header(f"📊 Project Procurement Ledger: {active_project}")
+    ledger = st.session_state.projects[active_project]["financial_ledger"]
+    col_left, col_right = st.columns([1, 1] if len(ledger) > 0 else [1, 2])
+    
+    with col_left:
+        st.subheader("➕ Add Expenses")
+        
+        with st.expander("📥 Option A: Import From Moodboard", expanded=False):
+            mb_options = [item.get('title') for item in board_items]
+            selected_mb_item = st.selectbox("Select saved item", options=["-- Select Item --"] + mb_options)
+            if st.button("📥 Import to Ledger") and selected_mb_item != "-- Select Item --":
+                target_item = next(item for item in board_items if item.get('title') == selected_mb_item)
+                st.session_state.projects[active_project]["financial_ledger"].append({
+                    "name": selected_mb_item, "supplier": target_item.get('source', 'Catalog'),
+                    "cost": 0.0, "qty": 1, "status": "Pending", "image_data": None
+                })
+                sync_ledger_to_cloud(active_project)
+                st.rerun()
+                
+        with st.expander("💾 Option B: Log Custom Purchase", expanded=False):
+            c_name = st.text_input("Description")
+            c_supplier = st.text_input("Supplier")
+            c_cost = st.number_input("Unit Cost (R)", min_value=0.0, step=100.0)
+            c_qty = st.number_input("Quantity", min_value=1, step=1, value=1)
+            c_status = st.selectbox("Status", ["Pending", "Quoted", "Paid"])
+            if st.button("💾 Log Custom Expense"):
+                if c_name.strip():
+                    st.session_state.projects[active_project]["financial_ledger"].append({
+                        "name": c_name.strip(), "supplier": c_supplier.strip() or "Direct Vendor",
+                        "cost": float(c_cost), "qty": int(c_qty), "status": c_status, "image_data": None
+                    })
+                    sync_ledger_to_cloud(active_project)
+                    st.rerun()
+        
+        with st.expander("⚡ Option C: Capture Quote / Snap Receipt", expanded=True):
+            input_mode = st.radio("Capture Method", ["📁 Upload Digital PDF", "📸 Mobile Camera Snap"], horizontal=True)
+            if input_mode == "📁 Upload Digital PDF":
+                uploaded_quote = st.file_uploader("Upload Supplier PDF Document", type=["pdf"])
+                if st.button("🔍 Run Document Scan"):
+                    if uploaded_quote is not None:
+                        with st.spinner("Extracting parameters..."):
+                            parsed_result = parse_quote_pdf(uploaded_quote)
+                            if parsed_result:
+                                st.session_state.projects[active_project]["financial_ledger"].append(parsed_result)
+                                sync_ledger_to_cloud(active_project)
+                                st.rerun()
+                            else:
+                                st.error("Could not read text details from this specific document structure.")
+            else:
+                camera_image = st.camera_input("Position receipt clearly")
+                cam_name = st.text_input("Receipt Label")
+                cam_supplier = st.text_input("Vendor")
+                cam_cost = st.number_input("Total Amount (R)", min_value=0.0, step=50.0)
+                if st.button("💾 Save Camera Snap to Ledger"):
+                    if camera_image is not None and cam_name.strip():
+                        st.session_state.projects[active_project]["financial_ledger"].append({
+                            "name": f"📸 {cam_name.strip()}", "supplier": cam_supplier.strip() or "On-Site",
+                            "cost": float(cam_cost), "qty": 1, "status": "Paid", "image_data": camera_image.getvalue()
+                        })
+                        sync_ledger_to_cloud(active_project)
+                        st.rerun()
+
+    with col_right:
+        st.subheader("📋 Budget Calculator")
+        budget_limit = st.session_state.projects[active_project]["budget"]
+        total_spent = sum(line['cost'] * line['qty'] for line in ledger)
+        remaining_budget = budget_limit - total_spent
+        
+        m1, m2 = st.columns(2)
+        m1.metric("Total Cost Allocation", f"R{total_spent:,.2f}")
+        m2.metric("Remaining Balance", f"R{remaining_budget:,.2f}", delta="Within Budget" if remaining_budget >= 0 else "Over Budget", delta_color="normal" if remaining_budget >= 0 else "inverse")
+        
+        if ledger:
+            export_df = pd.DataFrame([{
+                "Project": active_project, "Description": str(line["name"]).replace("📄 ", "").replace("📸 ", ""),
+                "Supplier": line["supplier"], "Unit Cost (R)": line["cost"], "Quantity": line["qty"],
+                "Total (R)": line["cost"] * line["qty"], "Status": line["status"]
+            } for line in ledger])
+            st.download_button(
+                label="📥 Export Ledger to Excel (.csv)", data=export_df.to_csv(index=False),
+                file_name=f"DesignSourcePro_{active_project}.csv", mime="text/csv"
+            )
+            
+        st.write("---")
+        if ledger:
+            for idx, line in enumerate(ledger):
+                with st.container(border=True):
+                    grid1, grid2 = st.columns([3, 2])
+                    with grid1:
+                        st.write(f"**{line['name']}**")
+                        st.caption(f"Supplier: {line['supplier']} | Total: R{line['cost']*line['qty']:,.2f}")
+                        if line.get("image_data"):
+                            st.image(line["image_data"], width=150)
+                    with grid2:
+                        new_cost = st.number_input(f"Cost (R)##{idx}", min_value=0.0, value=line['cost'], key=f"c_{idx}_{active_project}")
+                        new_qty = st.number_input(f"Qty##{idx}", min_value=1, value=line['qty'], key=f"q_{idx}_{active_project}")
+                        new_stat = st.selectbox(f"Status##{idx}", ["Pending", "Quoted", "Paid"], index=["Pending", "Quoted", "Paid"].index(line['status']), key=f"s_{idx}_{active_project}")
+                        if st.button("🗑️ Remove", key=f"del_{idx}_{active_project}"):
+                            st.session_state.projects[active_project]["financial_ledger"].pop(idx)
+                            sync_ledger_to_cloud(active_project)
+                            st.rerun()
+                            
+                    if new_cost != line['cost'] or new_qty != line['qty'] or new_stat != line['status']:
+                        st.session_state.projects[active_project]["financial_ledger"][idx].update({"cost": new_cost, "qty": new_qty, "status": new_stat})
+                        sync_ledger_to_cloud(active_project)
+                        st.rerun()
