@@ -3,7 +3,7 @@ import gspread
 from google.oauth2.service_account import Credentials
 import re
 import pandas as pd
-from io import StringIO
+# You can completely remove 'import pypdf' since pdfplumber is handled cleanly inside the helper function down below!
 
 # 1. Setup
 st.set_page_config(page_title="Design Source Pro", layout="wide")
