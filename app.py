@@ -80,7 +80,6 @@ def extract_clean_email(item_dict):
 def add_to_moodboard(item, project):
     title = item.get('Supplier Name') or item.get('Brand') or item.get('Product Name') or "Unknown Item"
     existing = st.session_state.projects[project]["moodboard_items"]
-    # Identify items safely using unique keys
     if title not in [x.get('title') for x in existing]:
         st.session_state.projects[project]["moodboard_items"].append({
             "title": title,
@@ -131,7 +130,8 @@ def parse_quote_pdf(file_upload):
             "supplier": "PDF Upload Scan",
             "cost": detected_total,
             "qty": 1,
-            "status": "Quoted"
+            "status": "Quoted",
+            "image_data": None
         }
     except ImportError:
         st.error("The upgraded scanning extension is still building on the server platform. Give it a moment to complete.")
@@ -176,12 +176,11 @@ with tab1:
                         with c2:
                             st.button(f"➕ Save to Board", key=f"src_{title}_{active_project}", on_click=add_to_moodboard, args=(item, active_project))
 
-# --- TAB 2: VISUAL MOODBOARD (UPDATED WITH STEP 1 CLIPPER) ---
+# --- TAB 2: VISUAL MOODBOARD ---
 with tab2:
     st.header(f"🎨 Visual Moodboard: {active_project}")
     
-    # NEW: Web Inspiration Clipper Panel
-    with st.expander("🔗 Clip Web Inspiration (Pinterest, Web Links, etc.)", expanded=True):
+    with st.expander("🔗 Clip Web Inspiration (Pinterest, Web Links, etc.)", expanded=False):
         col_clip1, col_clip2 = st.columns([2, 1])
         with col_clip1:
             web_img_url = st.text_input("Paste Image Address URL", placeholder="https://pinterest.com/pin/example.jpg or any web image link...")
@@ -199,14 +198,12 @@ with tab2:
                 }
                 st.session_state.projects[active_project]["moodboard_items"].append(new_pin)
                 st.success(f"Pinned '{web_img_title}' securely to your active project!")
-                st.preload = True
                 st.rerun()
             else:
                 st.error("Please provide both an Image URL address and a clear Inspiration Label description.")
 
     st.write("---")
     
-    # Dynamic Layout Matrix Renderer
     board_items = st.session_state.projects[active_project]["moodboard_items"]
     if board_items:
         cols = st.columns(3)
@@ -232,70 +229,98 @@ with tab2:
     else:
         st.info("Your visual moodboard is empty. Clip a link above or save matching assets using the Smart Assistant framework.")
 
-# --- TAB 3: PROJ FINANCES ---
+# --- TAB 3: PROJ FINANCES (UPDATED WITH STEP 2 CAMERA INPUT) ---
 with tab3:
     st.header(f"📊 Project Procurement Ledger: {active_project}")
-    col_left, col_right = st.columns([1, 2])
+    
+    # Adaptive layout split: stacks vertical automatically on native mobile viewpoints
+    col_left, col_right = st.columns([1, 1] if len(st.session_state.projects[active_project]["financial_ledger"]) > 0 else [1, 2])
     
     with col_left:
         st.subheader("➕ Add Expenses")
         
-        st.markdown("**Option A: Import From Moodboard**")
-        mb_options = [item.get('title') for item in board_items]
-        selected_mb_item = st.selectbox("Select saved item to pull into finances", options=["-- Select Item --"] + mb_options)
-        if st.button("📥 Import Item to Ledger") and selected_mb_item != "-- Select Item --":
-            target_item = next(item for item in board_items if item.get('title') == selected_mb_item)
-            new_expense = {
-                "name": selected_mb_item,
-                "supplier": target_item.get('source', 'Catalog Item'),
-                "cost": 0.0,  # Web links don't carry native structured spreadsheet pricing
-                "qty": 1,
-                "status": "Pending"
-            }
-            st.session_state.projects[active_project]["financial_ledger"].append(new_expense)
-            st.toast(f"Imported {selected_mb_item} into finances!")
-            st.rerun()
-            
-        st.write("---")
-        
-        st.markdown("**Option B: Log Custom/Ad-Hoc Purchase**")
-        c_name = st.text_input("Expense Description", placeholder="e.g. Custom Black Leather Chair")
-        c_supplier = st.text_input("Supplier/Store", placeholder="e.g. Weylandts")
-        c_cost = st.number_input("Unit Cost (R)", min_value=0.0, step=100.0)
-        c_qty = st.number_input("Quantity", min_value=1, step=1, value=1)
-        c_status = st.selectbox("Status", ["Pending", "Quoted", "Paid"])
-        if st.button("💾 Log Custom Expense"):
-            if c_name.strip():
-                new_custom = {
-                    "name": c_name.strip(),
-                    "supplier": c_supplier.strip() if c_supplier.strip() else "Direct Vendor",
-                    "cost": float(c_cost),
-                    "qty": int(c_qty),
-                    "status": c_status
+        with st.expander("📥 Option A: Import From Moodboard", expanded=False):
+            mb_options = [item.get('title') for item in board_items]
+            selected_mb_item = st.selectbox("Select saved item to pull into finances", options=["-- Select Item --"] + mb_options)
+            if st.button("📥 Import Item to Ledger") and selected_mb_item != "-- Select Item --":
+                target_item = next(item for item in board_items if item.get('title') == selected_mb_item)
+                new_expense = {
+                    "name": selected_mb_item,
+                    "supplier": target_item.get('source', 'Catalog Item'),
+                    "cost": 0.0,
+                    "qty": 1,
+                    "status": "Pending",
+                    "image_data": None
                 }
-                st.session_state.projects[active_project]["financial_ledger"].append(new_custom)
-                st.toast("Logged custom expense!")
+                st.session_state.projects[active_project]["financial_ledger"].append(new_expense)
+                st.toast(f"Imported {selected_mb_item} into finances!")
                 st.rerun()
+                
+        with st.expander("💾 Option B: Log Custom/Ad-Hoc Purchase", expanded=False):
+            c_name = st.text_input("Expense Description", placeholder="e.g. Custom Black Leather Chair")
+            c_supplier = st.text_input("Supplier/Store", placeholder="e.g. Weylandts")
+            c_cost = st.number_input("Unit Cost (R)", min_value=0.0, step=100.0)
+            c_qty = st.number_input("Quantity", min_value=1, step=1, value=1)
+            c_status = st.selectbox("Status", ["Pending", "Quoted", "Paid"])
+            if st.button("💾 Log Custom Expense"):
+                if c_name.strip():
+                    new_custom = {
+                        "name": c_name.strip(),
+                        "supplier": c_supplier.strip() if c_supplier.strip() else "Direct Vendor",
+                        "cost": float(c_cost),
+                        "qty": int(c_qty),
+                        "status": c_status,
+                        "image_data": None
+                    }
+                    st.session_state.projects[active_project]["financial_ledger"].append(new_custom)
+                    st.toast("Logged custom expense!")
+                    st.rerun()
+                else:
+                    st.error("Please enter a description.")
+        
+        # NEW: STEP 2 INVOICE MODALITY SWITCHER
+        with st.expander("⚡ Option C: Capture Quote / Snap Receipt", expanded=True):
+            input_mode = st.radio("Capture Method", ["📁 Upload Digital PDF", "📸 Mobile Camera Snap"], horizontal=True)
+            
+            if input_mode == "📁 Upload Digital PDF":
+                uploaded_quote = st.file_uploader("Upload Supplier PDF Document", type=["pdf"], key="invoice_scanner_upload")
+                if st.button("🔍 Run Document Scan"):
+                    if uploaded_quote is not None:
+                        with st.spinner("Extracting parameters..."):
+                            parsed_result = parse_quote_pdf(uploaded_quote)
+                            if parsed_result:
+                                st.session_state.projects[active_project]["financial_ledger"].append(parsed_result)
+                                st.toast("Processed quote parameters successfully!")
+                                st.rerun()
+                            else:
+                                st.error("Could not pull structured text lines.")
+                    else:
+                        st.warning("Please upload a PDF document first.")
+                        
             else:
-                st.error("Please enter a description.")
-
-        st.write("---")
-        
-        st.markdown("**Option C: ⚡ Scan Quote/Invoice PDF**")
-        uploaded_quote = st.file_uploader("Upload Supplier PDF Document", type=["pdf"], key="invoice_scanner_upload")
-        
-        if st.button("🔍 Run Document Scan"):
-            if uploaded_quote is not None:
-                with st.spinner("Extracting parameters and running deep structural scan..."):
-                    parsed_result = parse_quote_pdf(uploaded_quote)
-                    if parsed_result:
-                        st.session_state.projects[active_project]["financial_ledger"].append(parsed_result)
-                        st.toast("Processed quote parameters successfully!")
+                # Live Native Phone Camera Call Trigger
+                camera_image = st.camera_input("Position the paper receipt clearly in view")
+                cam_expense_name = st.text_input("Receipt Label / Description", placeholder="e.g. Showroom Sample Deposit")
+                cam_expense_supplier = st.text_input("Vendor Name", placeholder="e.g. Hertex Fabrics")
+                cam_expense_cost = st.number_input("Total Cost Amount (R)", min_value=0.0, step=50.0)
+                
+                if st.button("💾 Save Camera Snap to Ledger"):
+                    if camera_image is not None and cam_expense_name.strip():
+                        # Extract raw binary layout bytes to render a live thumbnail snapshot image
+                        img_bytes = camera_image.getvalue()
+                        new_camera_entry = {
+                            "name": f"📸 {cam_expense_name.strip()}",
+                            "supplier": cam_expense_supplier.strip() if cam_expense_supplier.strip() else "On-Site Receipt",
+                            "cost": float(cam_expense_cost),
+                            "qty": 1,
+                            "status": "Paid",
+                            "image_data": img_bytes # Binary frame mapping container
+                        }
+                        st.session_state.projects[active_project]["financial_ledger"].append(new_camera_entry)
+                        st.success("Receipt photo captured and linked successfully!")
                         st.rerun()
                     else:
-                        st.error("Could not pull structured text lines. The document format might be unreadable or empty.")
-            else:
-                st.warning("Please drag and drop a PDF document into the container zone before running scan operations.")
+                        st.error("Please take a snapshot photo and fill out an Expense Label before saving.")
 
     with col_right:
         st.subheader("📋 Budget Calculator")
@@ -319,16 +344,21 @@ with tab3:
         if ledger:
             for idx, line in enumerate(ledger):
                 with st.container(border=True):
-                    grid1, grid2, grid3 = st.columns([2, 1, 1])
+                    grid1, grid2 = st.columns([3, 2])
                     with grid1:
                         st.write(f"**{line['name']}**")
                         st.caption(f"Supplier: {line['supplier']} | Total: R{line['cost']*line['qty']:,.2f}")
+                        
+                        # NEW: Dynamic Thumbnail Preview Container if line item has camera input attached
+                        if line.get("image_data") is not None:
+                            st.image(line["image_data"], width=150, caption="Linked Receipt Image Capture")
+                            
                     with grid2:
                         new_cost = st.number_input(f"Cost (R)##val_{idx}", min_value=0.0, value=line['cost'], step=100.0, key=f"cost_input_{idx}")
                         new_qty = st.number_input(f"Qty##val_{idx}", min_value=1, value=line['qty'], step=1, key=f"qty_input_{idx}")
-                    with grid3:
                         new_stat = st.selectbox(f"Status##val_{idx}", ["Pending", "Quoted", "Paid"], index=["Pending", "Quoted", "Paid"].index(line['status']), key=f"status_select_{idx}")
-                        if st.button("🗑️ Remove", key=f"del_{idx}"):
+                        
+                        if st.button("🗑️ Remove Line", key=f"del_{idx}"):
                             st.session_state.projects[active_project]["financial_ledger"].pop(idx)
                             st.rerun()
                             
@@ -342,4 +372,4 @@ with tab3:
                 st.session_state.projects[active_project]["financial_ledger"] = []
                 st.rerun()
         else:
-            st.info("The procurement ledger is currently clear. Use the panel on the left to pull items over from your moodboard or enter manual shop receipts.")
+            st.info("The procurement ledger is clear. Run a digital PDF scan, switch to Mobile Camera Snap mode, or log a custom vendor expense.")
