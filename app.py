@@ -1,60 +1,34 @@
 import streamlit as st
 import gspread
 from google.oauth2.service_account import Credentials
-import re
 import pandas as pd
 
-# 1. Config
-st.set_page_config(page_title="Design Source Pro", layout="wide")
-scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scope)
+# The raw configuration block
+GCP_CONFIG = {
+    "type": "service_account",
+    "project_id": "numeric-nova-352015",
+    "private_key_id": "86363936730e00097bfbcac9fb2fb4eda406a99a",
+    "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC+RzPJAqxaizSWnRJYyxVhroxDLICggXRQIX/avC2r8g7iJcc0z1JbgAC8wuMB/3paTp3raMVqfF9yqNF5QX56AJJ5lnLfRuRYMNCqIGO0Bzb7syXkdKH4PizzJ1EsP4y5PxAK+XuU1mn5XhGzFA2bed6pirLpYtKXLmHQPAvQ8xzg+0nD0/IwJtKWZzh3RsDf5t5E+9fI7nP0UXejwW7C2LJSXVSQsnrez83m2An2fvm45JqaqNE4Fmvh0SW5XQLUu6WjnDUJJf\nnW9K8TEL073uUswh9iyoIs1501JFkRNvTsUjZf8isoKDBeUhumAw7jYh0+AmYSuMA\nnzEmoe5I7AgMBAAECggEAcNHDdBUWgm1FNg\n-----END PRIVATE KEY-----\n",
+    "client_email": "sourcing-app@numeric-nova-352015.iam.gserviceaccount.com",
+    "client_id": "109876543210987654321",
+    "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+    "token_uri": "https://oauth2.googleapis.com/token",
+    "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+    "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/sourcing-app%40numeric-nova-352015.iam.gserviceaccount.com"
+}
+
+# Connect using the dictionary above instead of the secrets box
+creds = Credentials.from_service_account_info(GCP_CONFIG, scopes=["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"])
 client = gspread.authorize(creds)
-FOLDER_ID = st.secrets["GDRIVE_FOLDER_ID"]
+FOLDER_ID = "1TxurbcHWwa3VVGFqjb-_13mXKoSs6L_X"
 
-# Helper: Get or Create Project File
-def get_project_spreadsheet(project_name):
+st.title("🏛️ Design Source Pro")
+
+# Simple check to see if we are connected
+try:
     files = client.list_spreadsheet_files(folder_id=FOLDER_ID)
-    file = next((f for f in files if f['name'] == project_name), None)
-    if not file:
-        file = client.create(project_name, folder_id=FOLDER_ID)
-        sheet = client.open_by_key(file['id']).sheet1
-        sheet.update("A1", [["Description", "Supplier", "Cost", "Qty", "Status"]])
-    return client.open_by_key(file['id']).sheet1
-
-# Session State
-if 'active_project' not in st.session_state: st.session_state.active_project = None
-
-# Sidebar: Project Management
-with st.sidebar:
-    st.header("📂 Project Library")
-    proj_name = st.text_input("New Project Name")
-    if st.button("➕ Create Project") and proj_name:
-        get_project_spreadsheet(proj_name)
-        st.rerun()
-    
-    files = client.list_spreadsheet_files(folder_id=FOLDER_ID)
-    project_list = [f['name'] for f in files]
-    active_selection = st.selectbox("Select Project", project_list)
-    if active_selection:
-        st.session_state.active_project = active_selection
-
-# Main Interface
-if st.session_state.active_project:
-    st.title(f"🏛️ {st.session_state.active_project}")
-    sheet = get_project_spreadsheet(st.session_state.active_project)
-    ledger = sheet.get_all_records()
-    
-    # Financial Entry
-    with st.expander("➕ Log Expense", expanded=True):
-        col1, col2, col3 = st.columns(3)
-        desc = col1.text_input("Item")
-        cost = col2.number_input("Cost", step=100.0)
-        qty = col3.number_input("Qty", value=1)
-        if st.button("Save"):
-            sheet.append_row([desc, "Vendor", cost, qty, "Pending"])
-            st.rerun()
-            
-    # Table View
-    st.dataframe(pd.DataFrame(ledger), use_container_width=True)
-    total = sum(d['Cost'] * d['Qty'] for d in ledger)
-    st.metric("Total Project Cost", f"R{total:,.2f}")
+    st.success("Successfully connected to Google Drive!")
+    project_names = [f['name'] for f in files]
+    selected_proj = st.selectbox("Select Project", project_names)
+except Exception as e:
+    st.error(f"Connection error: {e}")
