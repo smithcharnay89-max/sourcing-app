@@ -33,6 +33,7 @@ def sync_ledger_to_cloud(project_name):
     if not backup_sheet_ready:
         return
     try:
+        # Pull records using explicit Head=5 to avoid touching summary rows
         all_records = backup_sheet.get_all_records(expected_headers=[], head=5)
         
         # 1. Separate out records belonging to other projects so we don't overwrite them
@@ -55,20 +56,20 @@ def sync_ledger_to_cloud(project_name):
             ["--- BUDGET SUMMARY ---", f"ACTIVE WORKSPACE: {project_name}", "", "", "", ""],
             ["Total Allocated Client Budget:", budget_limit, "", "", "", ""],
             ["Total Active Funds Spent:", total_spent, "Remaining Project Balance:", remaining_balance, "", ""],
-            ["", "", "", "", "", ""], # Clean spacing row
-            ["Project", "Name", "Supplier", "Cost", "Qty", "Status"] # Main Ledger Header (Row 5)
+            ["", "", "", "", "", ""], 
+            ["Project", "Name", "Supplier", "Cost", "Qty", "Status"] # Row 5 Headers
         ]
         
-        # Append updated rows for this active workspace
+        # Append updated rows for this active workspace with strict positioning values
         for line in active_ledger:
             clean_name = str(line["name"]).replace("📄 ", "").replace("📸 ", "")
             new_sheet_data.append([
-                project_name,
-                clean_name,
-                line["supplier"],
-                line["cost"],  # Fixed column alignment position
-                line["qty"],
-                line["status"]
+                str(project_name),
+                str(clean_name),
+                str(line["supplier"]),
+                float(line["cost"] or 0.0), # Firm slot 4 placement
+                int(line["qty"] or 1),       # Firm slot 5 placement
+                str(line["status"])
             ])
             
         # Append the rest of your historic project rows safely back to the bottom
