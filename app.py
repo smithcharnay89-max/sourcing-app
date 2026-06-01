@@ -1,19 +1,19 @@
 import streamlit as st
 import gspread
+import json
 from google.oauth2.service_account import Credentials
 
 # Define the scopes
-SCOPES = [
-    "https://www.googleapis.com/auth/spreadsheets",
-    "https://www.googleapis.com/auth/drive"
-]
+SCOPES = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
 
-# Pull the configuration from the secrets
-if "gcp_service_account" in st.secrets:
-    creds_dict = dict(st.secrets["gcp_service_account"])
-    # Ensure the private key is a single line string
-    creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
-    client = gspread.authorize(creds)
-    st.write("Connection successful!")
-else:
-    st.error("Secrets not found.")
+# Load the file directly from the repo
+# Since we uploaded the file to the same folder, this will work
+with open("service_account.json") as f:
+    creds_dict = json.load(f)
+
+# Authorize using the credentials from the file
+creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
+client = gspread.authorize(creds)
+
+st.title("🏛️ Design Source Pro")
+st.success("Successfully connected to Google Drive!")
