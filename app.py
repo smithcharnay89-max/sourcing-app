@@ -38,7 +38,6 @@ def sync_ledger_to_cloud(project_name):
         # 1. Separate out records belonging to other projects so we don't overwrite them
         other_project_rows = []
         for r in all_records:
-            # We skip rows that look like summary boxes or row headers
             if r.get("Project") and r.get("Project") != project_name and "BUDGET SUMMARY" not in str(r.get("Project")):
                 other_project_rows.append([
                     r.get("Project"), r.get("Name"), r.get("Supplier"), 
@@ -56,8 +55,8 @@ def sync_ledger_to_cloud(project_name):
             ["--- BUDGET SUMMARY ---", f"ACTIVE WORKSPACE: {project_name}", "", "", "", ""],
             ["Total Allocated Client Budget:", budget_limit, "", "", "", ""],
             ["Total Active Funds Spent:", total_spent, "Remaining Project Balance:", remaining_balance, "", ""],
-            ["", "", "", "", "", ""], # Clean spacing row
-            ["Project", "Name", "Supplier", "Cost", "Qty", "Status"] # Main Ledger Header
+            ["", "", "", "", "", ""], 
+            ["Project", "Name", "Supplier", "Cost", "Qty", "Status"] 
         ]
         
         # Append updated rows for this active workspace
@@ -100,7 +99,6 @@ def discover_and_load_all_projects():
             if "ACTIVE WORKSPACE:" in p_header:
                 discovered_name = p_header.split("ACTIVE WORKSPACE:")[-1].strip()
                 try:
-                    # The next row in the sheet contains the budget value in column B (the second element)
                     budget_row = all_records[idx + 1]
                     budget_val = float(list(budget_row.values())[1] or 0.0)
                     if discovered_name in base_structure:
@@ -267,7 +265,6 @@ with st.sidebar:
         step=5000.0
     )
     
-    # If the user edits the budget slider, sync it up to the Excel data engine immediately
     if current_budget != st.session_state.projects[active_project]["budget"]:
         st.session_state.projects[active_project]["budget"] = current_budget
         sync_ledger_to_cloud(active_project)
@@ -446,12 +443,20 @@ with tab3:
                         new_cost = st.number_input(f"Cost (R)##{idx}", min_value=0.0, value=line['cost'], key=f"c_{idx}_{active_project}")
                         new_qty = st.number_input(f"Qty##{idx}", min_value=1, value=line['qty'], key=f"q_{idx}_{active_project}")
                         new_stat = st.selectbox(f"Status##{idx}", ["Pending", "Quoted", "Paid"], index=["Pending", "Quoted", "Paid"].index(line['status']), key=f"s_{idx}_{active_project}")
-                        if st.button("🗑️ Remove", key=f"del_{idx}_{active_project}"):
-                            st.session_state.projects[active_project]["financial_ledger"].pop(idx)
-                            sync_ledger_to_cloud(active_project)
-                            st.rerun()
-                            
-                    if new_cost != line['cost'] or new_qty != line['qty'] or new_stat != line['status']:
-                        st.session_state.projects[active_project]["financial_ledger"][idx].update({"cost": new_cost, "qty": new_qty, "status": new_stat})
-                        sync_ledger_to_cloud(active_project)
-                        st.rerun()
+                        
+                        btn_col1, btn_col2 = st.columns(2)
+                        with btn_col1:
+                            if st.button("✏️ Save Changes", key=f"save_{idx}_{active_project}"):
+                                st.session_state.projects[active_project]["financial_ledger"][idx].update({
+                                    "cost": new_cost, 
+                                    "qty": new_qty, 
+                                    "status": new_stat
+                                })
+                                sync_ledger_to_cloud(active_project)
+                                st.toast("✅ Google Sheet Updated!")
+                                st.rerun()
+                        with btn_col2:
+                            if st.button("🗑️ Remove", key=f"del_{idx}_{active_project}"):
+                                st.session_state.projects[active_project]["financial_ledger"].pop(idx)
+                                sync_ledger_to_cloud(active_project)
+                                st.rerun()
