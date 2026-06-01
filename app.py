@@ -1,17 +1,16 @@
 import streamlit as st
-from google.oauth2 import service_account
 import gspread
 
-# We will load the dict and pass it directly to gspread's client_from_dict
+# 1. Load the secrets dict
 creds_dict = st.secrets["gcp_service_account"]
-scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
 
-# Create credentials object
-creds = service_account.Credentials.from_service_account_info(creds_dict, scopes=scope)
+# 2. Let gspread handle the authentication directly from the dictionary
+client = gspread.service_account_from_dict(creds_dict)
 
-# Connect directly using the credentials object
-client = gspread.authorize(creds)
-
+# 3. Open your sheet
 SHEET_ID = "16FVZwJEuiFB50Assgdx4weL9HqdO5t1MpYoUPvoEAo8"
 sheet = client.open_by_key(SHEET_ID).sheet1
 data = sheet.get_all_records()
+
+# Test to see if it worked
+st.write("Successfully connected to Google Sheets!")
